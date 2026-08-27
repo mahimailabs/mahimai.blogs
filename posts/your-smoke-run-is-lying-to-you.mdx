@@ -1,0 +1,106 @@
+---
+title: 'Your smoke run is lying to you'
+description: 'A 12-utterance smoke run produced two confident, completely false results, and both looked fine. What a benchmark resolution is, and why it is not a detail.'
+pubDate: 2026-08-18
+tags: ['benchmarking', 'evaluation', 'telephony']
+author: 'Mahimai Raja J'
+---
+
+import Figure from '../../components/blog/Figure.astro';
+import SamplingCollapse from '../../components/blog/figures/SamplingCollapse.astro';
+import BenchmarkResolution from '../../components/blog/figures/BenchmarkResolution.astro';
+
+We run a cheap version of our benchmark before the expensive one. 12 utterances instead of 300, about a dollar instead of five. It exists to prove the wiring works before we spend real money.
+
+It did prove the wiring works. It also produced two results that were completely false, and both of them looked fine.
+
+## The first lie: every condition identical
+
+Four conditions. Wideband is the control with no phone line at all. Clean is the full G.711 chain. Then 1 percent and 3 percent packet loss.
+
+```
+piper             wideband 7.09%   clean 7.09%   loss_1pct 7.09%   loss_3pct 7.09%
+zipvoice_distill  wideband 7.09%   clean 7.09%   loss_1pct 7.09%   loss_3pct 7.09%
+```
+
+Identical to two decimal places, across two completely different systems, including a control with no codec applied. That is not a result, that is a bug.
+
+Except the codec was fine. We checked it directly: clean genuinely differs from wideband, and the loss conditions genuinely drop the right number of 20 ms frames.
+
+The actual cause was the sampling. Our text set is stored grouped by category, and the smoke run took the first 12 rows:
+
+```python
+utterances = loader.load()[:limit]
+```
+
+The first 60 rows are all digits. So the smoke run was 12 digit utterances and nothing else. Not a smaller version of the benchmark, a different benchmark: the per-category table collapsed to one row, and the prose, proper-noun and address paths were never exercised at all.
+
+The fix is to spread the sample across categories:
+
+```python
+utterances = loader.sample(loader.load(), limit)   # 2 from each of 6 categories
+```
+
+<Figure label="Not a smaller benchmark, a different one"><SamplingCollapse /></Figure>
+
+## The second lie: more packet loss helps
+
+With stratified sampling, the numbers finally varied. They also said this:
+
+```
+piper             wideband 1.75%   clean 0.88%   loss_1pct 1.75%   loss_3pct 0.88%
+zipvoice_distill  wideband 0.00%   clean 0.88%   loss_1pct 3.51%   loss_3pct 1.75%
+```
+
+Both systems score better at 3 percent packet loss than at 1 percent. That one is not defensible. Loss is strictly additive: the 3 percent condition drops every frame the 1 percent condition drops and then some, so it cannot come out ahead.
+
+We first wrote that the other reversal was impossible too, because Piper scores better after the phone line than before it. That was an overclaim, and worth correcting carefully, because it is the kind of prior that hides a real result. Band-limiting to 300 to 3400 Hz removes high-frequency content, and TTS output often carries artifacts up there that the recogniser trips over. Stripping them can genuinely help. So `clean` beating `wideband` is a claim to investigate, not a contradiction.
+
+The loss ordering is the check that actually holds. Keep the checks that follow from the physics, and be suspicious of the ones that only follow from intuition.
+
+Look at the raw counts instead of the percentages:
+
+```
+piper             2 errors   1   2   1
+zipvoice_distill  0 errors   1   4   2
+```
+
+114 reference words in total. The entire run turns on between zero and four word errors. One error is worth 0.88 percentage points, so a single word Whisper heard differently flips the ranking.
+
+There is no bug here. This is what noise looks like when your denominator is 114.
+
+<Figure label="A benchmark has a resolution"><BenchmarkResolution /></Figure>
+
+## The third lie: the code you edited is not the code that ran
+
+The last one caught us after the small run, on the expensive one.
+
+We found a bug in our text normalisation and fixed it. Six minutes earlier we had started a 300 utterance run, and scoring happens locally in that same process. Python loads a module once, at import. The edit changed the file on disk and nothing in the running interpreter, so all 300 utterances were scored by the code we had just deleted.
+
+The output looked completely normal. Nothing warns you about this.
+
+Worse, the records stored only the derived word error rate, not the transcripts. The transcripts are the expensive artefact: they cost GPU time, and everything after them is arithmetic. Discarding them meant a bug in the arithmetic cost another full run.
+
+Two fixes, and the second is the one that matters:
+
+Kill the run before changing anything it imports. An edit mid-flight is not applied, it is ignored.
+
+And store the transcripts in the record. Scoring is cheap and it will change; the audio is expensive and it will not. Now a normalisation change is re-scored offline for nothing:
+
+```bash
+handset-bench rescore --results results --write
+```
+
+## The rule
+
+A benchmark has a resolution, and it is not a detail. At 300 utterances our denominator is about 2,900 words and one error moves the number by 0.03 points. At 12 it is 0.88 points, which is larger than every effect we are trying to measure.
+
+Three things follow, and they generalise past telephony:
+
+A smoke run is a wiring check. It answers "did every stage execute", never "which system is better". Do not read its numbers as results, and do not put them in a table that looks like results.
+
+If your smoke run samples the first N rows of a sorted file, it is not sampling. Check what your subset actually contains before you trust anything it tells you.
+
+And keep whatever was expensive to produce. If you throw away the transcripts, every future bug in how you score them is billed to you again.
+
+The reassuring part is that both lies were catchable from the output alone. Identical values where they should differ, and non-monotonic values where the ordering is physically fixed, are both visible without knowing anything about the system. Look for the result that cannot be true, rather than the one you were hoping for.

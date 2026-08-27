@@ -1,0 +1,87 @@
+---
+title: 'Building a phone line in PyTorch'
+description: 'G.711, 8 kHz, a 300 to 3400 Hz passband, and packet loss, in about 200 lines. Three decisions that are easy to get wrong, where wrong is silent.'
+pubDate: 2026-08-15
+tags: ['telephony', 'dsp', 'pytorch', 'benchmarking']
+author: 'Mahimai Raja J'
+---
+
+import Figure from '../../components/blog/Figure.astro';
+import SignalChain from '../../components/blog/figures/SignalChain.astro';
+import FilterRolloff from '../../components/blog/figures/FilterRolloff.astro';
+import YouTube from '../../components/blog/YouTube.astro';
+
+If you want to know how your text to speech survives a phone call, you have to build the phone call. G.711, 8 kHz, a 300 to 3400 Hz passband, packet loss. It is about 200 lines. Three of the decisions in it are easy to get wrong, and wrong here is silent.
+
+## The order is physical, not arbitrary
+
+```
+native float32 PCM
+  1. highpass at 300 Hz      at the native rate
+  2. lowpass at 3400 Hz      at the native rate, also the anti-alias filter
+  3. resample to 8000 Hz
+  4. mu-law encode           -> integer codes 0..255
+  5. drop 20 ms frames       on the codes
+  6. mu-law decode           -> float32 at 8000 Hz
+```
+
+Band-limiting happens at the native rate, before downsampling. The 3400 Hz low pass already sits below the 4000 Hz Nyquist of an 8 kHz target, so it doubles as the anti-alias filter and the resampler cannot introduce artefacts a real carrier would not produce.
+
+Steps 4 and 5 are the ones people reverse. A network loses packets, and a packet carries encoded frames. So loss has to land on the codes, after encoding. Dropping samples before encoding models something that does not happen on a real line.
+
+<Figure label="The order is physical, not arbitrary"><SignalChain /></Figure>
+
+## One biquad is not a carrier
+
+The obvious lowpass is a single biquad. It is 12 dB per octave. Measured against a 3400 Hz cutoff, that leaves a 6000 Hz tone 10.9 dB down: a tone well outside the passband survives your "band-limited" stage almost intact, and you are measuring a filter no telco would ship.
+
+A real ITU-T G.712 channel is far steeper. Four cascaded sections give an 8th-order Butterworth at 48 dB per octave, which puts that same 6000 Hz tone 42.0 dB down.
+
+<Figure label="One biquad vs the real channel"><FilterRolloff /></Figure>
+
+<YouTube id="3wurfKru-kE" label="Watch: the tone that survives one filter and not the other" />
+
+But you cannot cascade four identical Q = 0.707 sections. Each one is 3 dB down at 3400 Hz, so four of them are 12 dB down there, and the real -3 dB corner lands near 2260 Hz. You have quietly eaten a third of the passband. Each section needs its own Q instead:
+
+```python
+def _butterworth_qs(sections: int) -> tuple[float, ...]:
+    order = 2 * sections
+    return tuple(
+        1.0 / (2.0 * math.cos((2 * k + 1) * math.pi / (2 * order)))
+        for k in range(sections)
+    )
+```
+
+That puts -3 dB at the nominal cutoff, 3.01 dB at 3400 Hz measured, while still rolling off at 6 * 2 * sections dB per octave.
+
+Test the steady state, not the whole signal. An IIR has a startup transient, and if you take the max over the full buffer you measure the transient, not the filter.
+
+## Mu-law has no exact zero
+
+Silence encodes to code 128. Decoding 128 gives 8.621e-5, which is -81.3 dBFS. Inaudible, but not zero.
+
+This matters when you fill dropped frames. Fill them with 0.0 and you have written a value the codec cannot produce. Assert on the encode side, not on a decoded 0.0 that will never appear.
+
+A trailing partial frame is left intact, because a jitter buffer cannot lose half a packet.
+
+## The differentiable version is smaller than it looks
+
+If you want to train through the codec, the usual worry is the 8-bit quantiser. It turns out to be the only worry.
+
+Mu-law companding is smooth and differentiable everywhere. Band-limiting is a linear biquad. Resampling is linear. And `expand(compand(x))` is exactly `x`: the pair cancels. So the only lossy operation in the whole roundtrip is the quantiser, and a straight-through estimator on it reduces to an identity gradient across the entire chain:
+
+```python
+def codec_roundtrip(x: torch.Tensor) -> torch.Tensor:
+    exact = exact_roundtrip(x)
+    return x + (exact - x).detach()
+```
+
+The forward pass *is* the reference implementation. Not "agrees within a tolerance", bit-identical by construction, because it is the same function.
+
+That matters more than it sounds. Our first version reimplemented the arithmetic and was off by one ULP, because torchaudio computes `exp(v) - 1` where the accurate spelling is `expm1(v)`. Reimplementing the reference is exactly how a codec layer drifts away from the codec it is supposed to model, and if it drifts you are training against a phone line the model will never meet at inference.
+
+## One implementation, imported everywhere
+
+The training pipeline imports these functions rather than reimplementing them. If training conditions and evaluation conditions were allowed to drift apart, every quality claim built on them would be unfalsifiable.
+
+That is the constraint worth keeping. Everything else here is details.

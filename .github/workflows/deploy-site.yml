@@ -1,0 +1,23 @@
+name: Rebuild mahimai.ca
+
+# Blog content lives here; the site pulls it at build time. Whenever content
+# lands on main, ping mahimai.ca's Cloudflare deploy hook so the change goes live.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'posts/**'
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger mahimai.ca deploy
+        env:
+          HOOK: ${{ secrets.CF_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "CF_DEPLOY_HOOK secret is not set; skipping." >&2
+            exit 1
+          fi
+          curl -fsSL -X POST "$HOOK"

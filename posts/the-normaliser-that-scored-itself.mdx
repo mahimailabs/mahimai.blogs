@@ -1,0 +1,98 @@
+---
+title: 'The normaliser that scored itself'
+description: 'The standard Whisper text normaliser silently deletes area codes and leading zeros, scoring a perfect phone number as 300 percent WER. The three bugs, and the fix.'
+pubDate: 2026-08-13
+tags: ['telephony', 'evaluation', 'asr', 'benchmarking']
+author: 'Mahimai Raja J'
+---
+
+import Figure from '../../components/blog/Figure.astro';
+import NormaliserFailure from '../../components/blog/figures/NormaliserFailure.astro';
+import NormaliserConvergence from '../../components/blog/figures/NormaliserConvergence.astro';
+import YouTube from '../../components/blog/YouTube.astro';
+
+We were building a benchmark for telephony text to speech. Synthesise a line, push it through a real G.711 phone line, transcribe it, score the word error rate. Standard setup. Everyone scores WER after normalising both sides, and everyone uses Whisper's English normaliser, because the papers do.
+
+Then every utterance containing a phone number came back as a near-total failure, on audio that sounded perfect.
+
+<YouTube id="U922BC_prao" label="Watch: a correct number scored as 300 percent, and the fix" />
+
+## The first layer
+
+The reference is spoken digits: "six one three five five five zero one nine eight". The ASR heard it correctly and wrote "613 555 0198".
+
+Run both through the normaliser:
+
+```
+reference   "six one three five five five zero one nine eight"  ->  "6135550198"
+transcript  "613 555 0198"                                      ->  "613 555 198"
+```
+
+The reference collapses to a single token. The transcript stays as three. One reference word, three errors. WER is 300 percent.
+
+Digits were 20 percent of our test set, and they are the hardest case on a narrow band. The headline number would have been measuring the normaliser, not the telephone line.
+
+## The obvious fix, and why it is not enough
+
+Split every run of digits into single digits, on both sides. Now "6135550198" and "613 555 0198" and "six one three..." all reduce to the same token sequence, and a wrong digit costs exactly one word, which is the granularity a phone agent cares about.
+
+Keep ordinals whole, or "first" becomes "1 st" and a single misheard word costs two errors.
+
+We shipped that, wrote a test, and moved on. It was still wrong.
+
+## The second layer: leading zeros
+
+Look at that transcript again.
+
+```
+"613 555 0198"  ->  "613 555 198"
+```
+
+The zero is gone. The normaliser reads each digit group as a number, and numbers do not have leading zeros. Atomising afterwards cannot recover a digit that was already deleted.
+
+```
+"0198"  ->  "198"
+"007"   ->  "7"
+"0500"  ->  "500"
+```
+
+Every leading zero in a phone number, a PIN, an extension, or a time silently disappears from the hypothesis. The spelled-out reference keeps its zero, because there it is the word "zero". So a correct transcription loses a word it actually got right.
+
+29 percent of our references contain a zero. One of them is an account number starting "0 0 7", where two digits vanish.
+
+## The third layer: brackets
+
+```
+"(613) 555-0198"  ->  "555 198"
+```
+
+The whole area code is gone. The normaliser treats a bracketed span as an annotation and deletes it. That is correct behaviour for transcription conventions like "(inaudible)". It is catastrophic for a North American phone number.
+
+<Figure label="One correct number, three silent losses"><NormaliserFailure /></Figure>
+
+## The actual fix
+
+Atomise the digits *before* the normaliser runs, not just after, and strip brackets first so nothing gets deleted as an annotation:
+
+```python
+def normalize(text: str) -> str:
+    presplit = _BRACKET.sub(" ", text)
+    presplit = _DIGIT_RUN.sub(lambda m: f" {m.group()} ", presplit)
+    normalised = _normalizer()(presplit)
+    stripped = _NON_WORD.sub(" ", normalised)
+    atomised = _DIGIT_RUN.sub(lambda m: f" {m.group()} ", stripped)
+    tokens = [_DIGIT_WORDS.get(tok, tok) for tok in atomised.split()]
+    return _MERIDIEM.sub(lambda m: m.group().replace(" ", ""), " ".join(tokens))
+```
+
+Pre-splitting means the normaliser only ever sees single digits, which it leaves alone. The mapping afterwards exists because the normaliser is context-dependent in the other direction too: "one thousand two hundred forty seven" becomes "1247", but a standalone "1" stays the word "one".
+
+<Figure label="After the fix, every spelling converges"><NormaliserConvergence /></Figure>
+
+## The part that should worry you
+
+None of these three bugs announce themselves. There is no exception, no warning. You get a number, the number looks plausible, and it is measuring your text pipeline instead of your audio.
+
+If you are scoring ASR on anything transactional (phone numbers, order IDs, amounts, addresses, times) with the stock normaliser, you have some version of this, and your digit scores are wrong. Test it directly: take a correct transcription of your own reference, in the form your ASR actually emits, and confirm it scores zero.
+
+Ours did not.
