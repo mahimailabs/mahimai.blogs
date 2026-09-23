@@ -31,7 +31,9 @@ A call can connect successfully and still feel terrible. The audio might arrive 
 
 Let’s follow that sentence from the microphone to the agent and back. I’ve split the path into six boxes so we can look at each part separately.
 
-## Before we open anything, here’s the whole trip
+<span id="before-we-open-anything-heres-the-whole-trip" aria-hidden="true" />
+
+## The Big Picture
 
 Each box below has one job. I’ll introduce the protocols as we get to them.
 
@@ -58,7 +60,9 @@ A clean network trace won’t rule out a problem with turn detection or speech r
 
 ![Six responsibilities in a voice call: capture, connection setup, delivery, reception, agent processing, and playback.](./images/webrtc/02-overview.webp)
 
-## A: You start talking. What actually leaves your browser?
+<span id="a-you-start-talking-what-actually-leaves-your-browser" aria-hidden="true" />
+
+## A: Audio Capture
 
 The microphone produces a changing electrical signal. Your device samples it into numbers, and the browser exposes an audio track through `getUserMedia()`.
 
@@ -70,7 +74,9 @@ Check where your recording comes from: before or after the browser processes the
 
 If you compare a local recording from one point with agent audio from another, you may blame the network for a difference introduced before the first packet left.
 
-### A frame isn’t a word
+<span id="a-frame-isnt-a-word" aria-hidden="true" />
+
+### Audio Frames
 
 The browser’s audio encoder works on short stretches of sound. It has no reason to wait for “Friday” to finish.
 
@@ -84,7 +90,9 @@ The same duration of missing audio could remove a pause or part of an appointmen
 
 ![Packet boundaries divide sound by time, not words. Four example packets each contain 20 ms of audio.](./images/webrtc/03-packets.webp)
 
-### Smaller packets have a cost too
+<span id="smaller-packets-have-a-cost-too" aria-hidden="true" />
+
+### Packet Duration
 
 A packet needs its audio before it can be sent. Collecting more audio per packet adds waiting time, but sending smaller packets increases the number of headers and packet-processing operations.
 
@@ -92,7 +100,9 @@ Measure both the delay and processing cost when changing packet duration. It doe
 
 Opus also supports features such as discontinuous transmission, which can reduce transmission during silence, and forward error correction, which can include recovery information for earlier audio. These depend on configuration and encoder behaviour. Don’t assume either feature is active because the codec supports it. [Opus codec specification](https://www.rfc-editor.org/rfc/rfc6716.html).
 
-## B: How does your voice find its way to the agent?
+<span id="b-how-does-your-voice-find-its-way-to-the-agent" aria-hidden="true" />
+
+## B: Connection Setup
 
 Opening the website proves that your browser can reach a web server. The audio connection has its own setup.
 
@@ -104,7 +114,9 @@ Save the negotiated session description during a test. Check which codec the ses
 
 SDP also carries information for connection establishment, including ICE credentials. Candidate addresses can be exchanged as they become available. The [ICE offer/answer specification](https://www.rfc-editor.org/rfc/rfc8839.html) describes how those details fit into the exchange.
 
-### The address you know may not be the address that works
+<span id="the-address-you-know-may-not-be-the-address-that-works" aria-hidden="true" />
+
+### ICE Candidates
 
 Your laptop might have a private address behind a router. The router can rewrite addresses using network address translation, or NAT. The remote endpoint cannot necessarily reach your private address directly.
 
@@ -116,7 +128,9 @@ In our example, the browser’s remote endpoint is the media server. The selecte
 
 That’s why moving a language model closer to the media server won’t necessarily change the browser’s connection statistics.
 
-### Sometimes the working route needs a relay
+<span id="sometimes-the-working-route-needs-a-relay" aria-hidden="true" />
+
+### TURN Relays
 
 **TURN**, Traversal Using Relays around NAT, lets an endpoint send traffic through a relay. The relay forwards it to the other endpoint. The relay continues forwarding traffic for as long as that route is in use. [TURN specification](https://www.rfc-editor.org/rfc/rfc8656.html).
 
@@ -128,7 +142,9 @@ Write down the selected route in a test report. “Same code, different Wi-Fi”
 
 ![A browser can reach the media server directly or through a TURN relay. The server forwards media to the agent.](./images/webrtc/04-routes.webp)
 
-### Connected doesn’t yet mean readable audio
+<span id="connected-doesnt-yet-mean-readable-audio" aria-hidden="true" />
+
+### Transport Security
 
 The endpoints establish security using **DTLS**, Datagram Transport Layer Security. DTLS-SRTP derives keys used to protect the media with **SRTP**, Secure Real-time Transport Protocol.
 
@@ -138,7 +154,9 @@ Check where encryption ends. Transport encryption to a media server doesn’t, b
 
 A packet capture is useful here, but an encrypted payload won’t explain why the recogniser heard “Thursday.” For that, you need evidence from a point where audio is available.
 
-## C: Your sentence arrives in pieces. Why doesn’t it sound that way?
+<span id="c-your-sentence-arrives-in-pieces-why-doesnt-it-sound-that-way" aria-hidden="true" />
+
+## C: Packet Delivery
 
 Each media packet carries more than compressed sound.
 
@@ -162,7 +180,9 @@ The timestamps advance evenly, but the arrival times vary.
 
 Playing each packet immediately on arrival would turn network timing into sound timing. The receiver needs some room to absorb that variation.
 
-### Smooth audio means waiting somewhere
+<span id="smooth-audio-means-waiting-somewhere" aria-hidden="true" />
+
+### Jitter Buffers
 
 A **jitter buffer** holds arriving media so it can be played in a steadier sequence. More waiting can absorb more variation, but the caller hears the result later.
 
@@ -174,7 +194,9 @@ For a voice agent, that repaired audio can become input to another model. Listen
 
 <JitterLab client:visible />
 
-### A late packet may already be useless
+<span id="a-late-packet-may-already-be-useless" aria-hidden="true" />
+
+### Late Packets
 
 Once the receiver has played past a missing stretch of audio, a late packet cannot change what the caller heard.
 
@@ -188,7 +210,9 @@ Record whether the agent booked the right appointment as well as the packet-loss
 
 ![Packets sent evenly arrive unevenly. A jitter buffer delays playback to smooth the timing. Illustrative, not measured.](./images/webrtc/05-jitter-buffer.webp)
 
-## D: The audio arrived. Did the agent hear what you said?
+<span id="d-the-audio-arrived-did-the-agent-hear-what-you-said" aria-hidden="true" />
+
+## D: Audio Reception
 
 In a room-based setup, a **selective forwarding unit**, or SFU, routes media between participants. The agent can receive a caller’s track as another participant. A media server forwarding a stream and an agent decoding it are different jobs. [LiveKit self-hosting overview](https://docs.livekit.io/transport/self-hosting/).
 
@@ -204,7 +228,9 @@ To check for that mistake, compare the sample count with the expected audio dura
 
 ![Forwarded packets are decoded into audio samples and prepared for speech recognition at the agent.](./images/webrtc/06-decoding.webp)
 
-### Your queue can become the delay
+<span id="your-queue-can-become-the-delay" aria-hidden="true" />
+
+### Queue Delay
 
 Suppose an application collects five 20-millisecond chunks before forwarding them. The first chunk spends another 80 milliseconds waiting for the other four to arrive, assuming steady arrival.
 
@@ -218,7 +244,9 @@ For a controlled test, compare audio after browser processing with audio immedia
 
 The [phone-line article](/blog/building-a-phone-line-in-pytorch) follows a different audio path through telephony. Its channel assumptions should not be silently applied to a browser’s Opus stream.
 
-## E: You stopped speaking. Why is the agent still waiting?
+<span id="e-you-stopped-speaking-why-is-the-agent-still-waiting" aria-hidden="true" />
+
+## E: Turn Detection
 
 Return to the sentence:
 
@@ -230,7 +258,9 @@ During the pause before Friday, the speech detector sees silence. You haven’t 
 
 The browser has no protocol message that means “this person has finished explaining their request.” That decision belongs to the conversation system.
 
-### A final transcript still needs a definition
+<span id="a-final-transcript-still-needs-a-definition" aria-hidden="true" />
+
+### Transcript Finality
 
 A recogniser may finalise a segment while the person intends to continue. Before you use an event as permission to answer, check what that provider means by “final.”
 
@@ -238,7 +268,9 @@ I would test the pause with several continuations: a day, a correction, and a lo
 
 Waiting longer reduces the risk of cutting someone off, but also delays replies when they have finished.
 
-### Starting early makes cancellation part of the design
+<span id="starting-early-makes-cancellation-part-of-the-design" aria-hidden="true" />
+
+### Preemptive Generation
 
 An agent can begin preparing a reply before it is certain you have finished. LiveKit exposes preemptive generation alongside turn and interruption settings. Work started early may need to be discarded when the user continues. [Turn-taking tuning](https://docs.livekit.io/agents/logic/turns/tuning/).
 
@@ -250,7 +282,9 @@ The same care applies to reporting speed. If generation overlaps your speech, it
 
 Even with no network problem, the agent may still be waiting for permission to answer.
 
-## F: The agent has an answer. Why haven’t you heard it yet?
+<span id="f-the-agent-has-an-answer-why-havent-you-heard-it-yet" aria-hidden="true" />
+
+## F: Reply Playback
 
 After the first text token arrives, the agent still has to generate audio and send it to the caller. Measure each of those steps separately.
 
@@ -260,7 +294,9 @@ Name these events separately in a trace. LiveKit’s observability data distingu
 
 “Audio sent” is especially easy to misread. It could mean added to an application queue, accepted by an SDK, or transmitted as media. Those are different timestamps.
 
-### Measure the wait the caller experiences
+<span id="measure-the-wait-the-caller-experiences" aria-hidden="true" />
+
+### Response Timing
 
 For response delay, I would use this target:
 
@@ -288,7 +324,9 @@ Also keep clock boundaries explicit. Two processes can both report “millisecon
 
 Use local elapsed times for local work. To align machines, document the clock alignment and its uncertainty. If your uncertainty is larger than the improvement, the trace doesn’t establish that improvement.
 
-### The quiet part of the chart can hide the problem
+<span id="the-quiet-part-of-the-chart-can-hide-the-problem" aria-hidden="true" />
+
+### Overlapping Work
 
 A model trace might show useful work throughout the response. The caller still experiences the gaps between audible turns.
 
@@ -300,7 +338,9 @@ And check the rest of the answer. A fast opening word followed by a long silence
 
 ![Recognition overlaps speech, and playback can start while reply generation continues. This timeline is conceptual.](./images/webrtc/07-response-timeline.webp)
 
-## You interrupt it. How much of the old answer survives?
+<span id="you-interrupt-it-how-much-of-the-old-answer-survives" aria-hidden="true" />
+
+## Interruption Handling
 
 The agent starts saying, “I can move your appointment to Friday at…”
 
@@ -318,7 +358,9 @@ Measure how long the old reply remains audible after the caller interrupts.
 
 ![An interruption cancels generation and clears pending audio. Audio in transit may still arrive, and audio already heard cannot be recalled.](./images/webrtc/08-interruption.webp)
 
-### The next answer needs the conversation you actually had
+<span id="the-next-answer-needs-the-conversation-you-actually-had" aria-hidden="true" />
+
+### Conversation History
 
 Suppose the full generated sentence was “Friday at three is available,” but the caller only heard “Friday.” Saving the full sentence as delivered history can mislead the next response.
 
@@ -328,7 +370,9 @@ Finally, include the speaker in your test. The agent’s own output can return t
 
 After stopping playback, check the saved conversation too. It should reflect the part of the reply the caller heard.
 
-## If the call feels wrong, where do you look first?
+<span id="if-the-call-feels-wrong-where-do-you-look-first" aria-hidden="true" />
+
+## Finding the Bottleneck
 
 ![Start with connection setup for slow joins, delivery and reception for broken audio, recognition for wrong words, and cancellation for speech that continues after interruption.](./images/webrtc/09-debugging-guide.webp)
 
@@ -357,7 +401,9 @@ Save the input audio, browser and SDK versions, selected route, negotiated codec
 
 Repeat the sentence with a pause before Friday, during the agent’s reply, and under a controlled burst of packet loss. Compare where each run first differs.
 
-## Now put the whole call together
+<span id="now-put-the-whole-call-together" aria-hidden="true" />
+
+## System Architecture
 
 The opening diagram followed one sentence. This view shows where those jobs run in the room-based system we used throughout the article.
 
@@ -373,13 +419,17 @@ The opening diagram followed one sentence. This view shows where those jobs run 
 
 These arrows show connections, not a schedule. Recognition can run while you speak. Reply audio can play while more speech is being generated. Your microphone can keep sending audio throughout, which lets the agent hear an interruption.
 
-## Open the box where the evidence points
+<span id="open-the-box-where-the-evidence-points" aria-hidden="true" />
+
+## Follow the Evidence
 
 When a call goes wrong, compare recordings and timings at each stage. Find the first point where they differ from what you expected, then investigate that part of the system.
 
 [_WebRTC for the Curious_](https://webrtcforthecurious.com/) is worth reading alongside this article for a deeper treatment of the protocols. Use the same sentence in a controlled call and add your own timings to this map.
 
-## A short glossary, if you need it
+<span id="a-short-glossary-if-you-need-it" aria-hidden="true" />
+
+## Technical Glossary
 
 | Term                            | Meaning here                                                                                                                                 |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
