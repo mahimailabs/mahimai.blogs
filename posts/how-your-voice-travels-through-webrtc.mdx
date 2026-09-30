@@ -1,452 +1,294 @@
 ---
-title: 'How your voice travels through WebRTC: Voice AI agents edition'
-description: 'Follow one spoken sentence from your microphone to a voice agent and back. See where packets, buffers, turn detection, and playback change the conversation.'
+title: 'How your voice travels through WebRTC'
+description: 'Follow a sentence through a WebRTC voice agent: microphone, packets, recognition, reply, and interruption. Try a jitter lab and reproduce an 80 ms queue delay.'
 pubDate: 2026-09-23
+updatedDate: 2026-09-30
 author: 'Mahimai Raja J'
 tags: ['webrtc', 'voice-ai', 'audio', 'latency']
 draft: false
-cover: ./images/webrtc/01-cover.webp
-coverAlt: Speech travels from a caller to a voice agent, with audio returning to the caller.
+cover: ./images/webrtc/webrtc-cover-watercolour.webp
+coverAlt: A woman speaks at her laptop as audio packets travel to a server and a reply returns.
+socialImage: ./images/webrtc/webrtc-cover-watercolour-social.jpg
 ---
 
-import { Image } from 'astro:assets';
-import coverImage from './images/webrtc/01-cover.webp';
-
 import JitterLab from '@/components/islands/JitterLab';
+import VoiceCallMap from '@/components/blog/VoiceCallMap.astro';
+import ResponseTimeline from '@/components/blog/ResponseTimeline.astro';
+import { Image } from 'astro:assets';
+import coverImage from './images/webrtc/webrtc-cover-watercolour.webp';
+import jitterImage from './images/webrtc/webrtc-jitter-watercolour.webp';
+import interruptionImage from './images/webrtc/webrtc-interruption-watercolour.webp';
 
-<Image
-  src={coverImage}
-  alt="How your voice travels through WebRTC, from caller to agent and back."
-  loading="eager"
-  fetchpriority="high"
-  widths={[480, 800, 1200, 1536]}
-  sizes="(max-width: 1023px) calc(100vw - 40px), (max-width: 1279px) calc(100vw - 496px), 784px"
-/>
+<Image src={coverImage} alt="A woman speaks at her laptop as audio packets travel to a server and a reply returns." widths={[480, 800, 1200, 1672]} sizes="(min-width: 1280px) 784px, (min-width: 1024px) 55vw, (min-width: 832px) 792px, calc(100vw - 40px)" loading="eager" fetchpriority="high" class="article-cover" />
 
 You say, “Can I move my appointment to Friday?”
 
-The agent pauses, then answers. During that pause, your audio reaches the agent, the agent decides you have finished speaking, and its reply travels back to your speaker.
+Your browser sends the sound in small pieces. A receiver turns those pieces back into audio, and the voice agent decides when it has enough information to answer. The reply makes the return trip to your speaker. WebRTC carries the media; the conversation system decides what to do with it.
 
-A call can connect successfully and still feel terrible. The audio might arrive late. A word might change on the way through speech recognition. The agent might wait after you finish, or keep talking after you interrupt.
+A connected call can still get that sentence wrong. “Friday” can reach recognition damaged or late. A pause before it can trigger an early answer. And when you correct yourself with “Actually, Monday,” the old reply can keep playing.
 
-Let’s follow that sentence from the microphone to the agent and back. I’ve split the path into six boxes so we can look at each part separately.
+We'll follow those moments through one call. If you're already investigating a failure, jump to [the symptom table](#pipeline-diagnostics).
 
 <span id="before-we-open-anything-heres-the-whole-trip" aria-hidden="true" />
+<span id="the-big-picture" aria-hidden="true" />
+<span id="now-put-the-whole-call-together" aria-hidden="true" />
 
-## The Big Picture
+<VoiceCallMap />
 
-Each box below has one job. I’ll introduce the protocols as we get to them.
+The two views show different systems: a human agent's Genesys Cloud phone and an AI worker in a LiveKit room. LiveKit is not a component of the Genesys path shown here. Each named service has a job; several jobs can share a machine.
 
-| Box   | What happens inside it                                                       |
-| ----- | ---------------------------------------------------------------------------- |
-| **A** | Your device turns sound into audio the browser can send.                     |
-| **B** | The two ends agree how to communicate and establish a secure, working route. |
-| **C** | Small pieces of your audio travel across that route.                         |
-| **D** | The receiving system turns those pieces back into usable audio.              |
-| **E** | The agent listens, decides when to answer, and produces a reply.             |
-| **F** | The reply travels back and becomes sound from your speaker.                  |
-
-**The audio path:** you → A → C → D → E → F → you.
-
-**B sets up the connection used by that path.** It doesn’t run again for every sentence. Once connected, audio can flow both ways at the same time.
-
-These boxes are responsibilities, not necessarily six machines. Several can run in one process. Some keep working while others wait.
-
-We’ll follow a browser connected to a media server, with a separate agent subscribed to the audio. Think of a LiveKit-style room. A browser that connects directly to a realtime model has a different layout; check where its WebRTC connection actually ends before applying this map.
-
-The example agent uses speech recognition, a language model, and speech synthesis. An audio-to-audio model changes box E. It still needs audio to arrive and a reply to reach the caller.
-
-A clean network trace won’t rule out a problem with turn detection or speech recognition.
-
-![Six responsibilities in a voice call: capture, connection setup, delivery, reception, agent processing, and playback.](./images/webrtc/02-overview.webp)
+The rest of this walkthrough follows the **browser-to-AI path in the LiveKit view**. Its media server forwards tracks to the worker, which calls speech recognition, language-model and speech-synthesis services. The phone path adds a SIP bridge and may use different codecs. A browser connected directly to an audio-to-audio model has a different endpoint again, so identify your actual media path before applying the timing examples.
 
 <span id="a-you-start-talking-what-actually-leaves-your-browser" aria-hidden="true" />
+<span id="a-audio-capture" aria-hidden="true" />
 
-## A: Audio Capture
+<span id="from-your-microphone-to-webrtc-packets" aria-hidden="true" />
 
-The microphone produces a changing electrical signal. Your device samples it into numbers, and the browser exposes an audio track through `getUserMedia()`.
+## Capture and Encoding
 
-Before encoding, the browser may process the microphone audio. Echo cancellation tries to remove the speaker’s output from microphone input. Noise suppression reduces unwanted sound. Automatic gain control adjusts the level.
+The microphone's signal becomes samples: numbers representing sound over time. The browser exposes an audio track through `getUserMedia()`. Before encoding it, capture processing can suppress noise, adjust gain, and cancel sound returning from the speaker. The [Media Capture specification](https://www.w3.org/TR/mediacapture-streams/) defines the constraints and settings exposed to applications.
 
-Those choices affect the audio the agent receives. Requesting them in your code doesn’t tell you every detail of the device’s processing. Inspect the track’s actual settings, and listen to what you capture. The [Media Capture specification](https://www.w3.org/TR/mediacapture-streams/) defines the constraints and settings the browser exposes.
-
-Check where your recording comes from: before or after the browser processes the microphone audio.
-
-If you compare a local recording from one point with agent audio from another, you may blame the network for a difference introduced before the first packet left.
+A recording taken before that processing can differ from what the browser sends. If “Friday” sounds clear locally but recognition gets it wrong, the recording point matters. “Local audio” is too vague to establish that the network changed it.
 
 <span id="a-frame-isnt-a-word" aria-hidden="true" />
-
-### Audio Frames
-
-The browser’s audio encoder works on short stretches of sound. It has no reason to wait for “Friday” to finish.
-
-We’ll use Opus with 20 milliseconds of audio per packet in this example. Your session may use a different duration. Opus allows different frame lengths, and a packet can contain more than one frame. [Opus RTP format](https://www.rfc-editor.org/rfc/rfc7587.html).
-
-With that assumption, one second of continuous audio produces 50 packets. A boundary can cut through a vowel. A packet can include the end of one word and the start of another.
-
-Losing a packet removes a stretch of sound. How much that affects recognition depends on which part of the sentence was in it.
-
-The same duration of missing audio could remove a pause or part of an appointment time. Packet counts alone won’t tell you the difference.
-
-![Packet boundaries divide sound by time, not words. Four example packets each contain 20 ms of audio.](./images/webrtc/03-packets.webp)
-
+<span id="audio-frames" aria-hidden="true" />
 <span id="smaller-packets-have-a-cost-too" aria-hidden="true" />
+<span id="packet-duration" aria-hidden="true" />
 
-### Packet Duration
+The encoder works on stretches of sound, without waiting for word boundaries. For this walkthrough, assume Opus with **20 ms of audio per packet**: 50 packets per second of continuous transmission. A packet can cut through a vowel or contain the end of “to” and the beginning of “Friday.” Losing 20 ms of silence and losing 20 ms of that date have different consequences for the request.
 
-A packet needs its audio before it can be sent. Collecting more audio per packet adds waiting time, but sending smaller packets increases the number of headers and packet-processing operations.
-
-Measure both the delay and processing cost when changing packet duration. It doesn’t remove the encoder’s own delay or the buffers elsewhere in the call.
-
-Opus also supports features such as discontinuous transmission, which can reduce transmission during silence, and forward error correction, which can include recovery information for earlier audio. These depend on configuration and encoder behaviour. Don’t assume either feature is active because the codec supports it. [Opus codec specification](https://www.rfc-editor.org/rfc/rfc6716.html).
+Twenty milliseconds is an example, not a WebRTC constant. Opus supports different frame lengths, and packets can contain multiple frames. Collecting more audio per packet adds waiting; shorter packets increase header and packet-processing overhead. Neither choice removes delays elsewhere in the call. [RFC 7587](https://www.rfc-editor.org/rfc/rfc7587.html) describes the Opus packet format; [RFC 6716](https://www.rfc-editor.org/rfc/rfc6716.html) defines codec features including silence suppression and error correction. Support doesn't establish that a feature is active in a particular session.
 
 <span id="b-how-does-your-voice-find-its-way-to-the-agent" aria-hidden="true" />
+<span id="b-connection-setup" aria-hidden="true" />
 
-## B: Connection Setup
+<span id="the-route-your-sentence-takes" aria-hidden="true" />
 
-Opening the website proves that your browser can reach a web server. The audio connection has its own setup.
+## Connection Setup
 
-The two ends exchange session descriptions: what they can send, what they can receive, and the information needed to establish the connection. The format is called **SDP**, or Session Description Protocol.
+The audio needs a working connection before the sentence can travel. Loading a website establishes access to its web server, but the media connection has its own setup. The application exchanges session information, the endpoints test possible paths, and they establish media security. That work doesn't repeat for every sentence.
 
-The application carries those descriptions through its signalling channel. That might use a WebSocket or an HTTP request. Sending an offer over that channel doesn’t mean your voice travels through the same channel. [WebRTC browser API](https://www.w3.org/TR/webrtc/).
-
-Save the negotiated session description during a test. Check which codec the session actually uses, even if you requested a specific one.
-
-SDP also carries information for connection establishment, including ICE credentials. Candidate addresses can be exchanged as they become available. The [ICE offer/answer specification](https://www.rfc-editor.org/rfc/rfc8839.html) describes how those details fit into the exchange.
+In this call, the browser's remote endpoint is the media server. The agent has another media connection, and a remote speech recogniser can be further away still. A browser's connection statistics describe its leg of that journey.
 
 <span id="the-address-you-know-may-not-be-the-address-that-works" aria-hidden="true" />
-
-### ICE Candidates
-
-Your laptop might have a private address behind a router. The router can rewrite addresses using network address translation, or NAT. The remote endpoint cannot necessarily reach your private address directly.
-
-**ICE**, Interactive Connectivity Establishment, gathers possible endpoints and tests candidate pairs. Some candidates come from local interfaces. Others describe a public mapping discovered with **STUN**, Session Traversal Utilities for NAT. A relay candidate provides another possible route.
-
-ICE checks connectivity and nominates a pair. It is not a global search for the lowest-latency path across the internet. [ICE specification](https://www.rfc-editor.org/rfc/rfc8445.html).
-
-In our example, the browser’s remote endpoint is the media server. The selected pair doesn’t describe the entire journey to the speech model. The agent and any model provider are further along the path.
-
-That’s why moving a language model closer to the media server won’t necessarily change the browser’s connection statistics.
-
+<span id="ice-candidates" aria-hidden="true" />
 <span id="sometimes-the-working-route-needs-a-relay" aria-hidden="true" />
-
-### TURN Relays
-
-**TURN**, Traversal Using Relays around NAT, lets an endpoint send traffic through a relay. The relay forwards it to the other endpoint. The relay continues forwarding traffic for as long as that route is in use. [TURN specification](https://www.rfc-editor.org/rfc/rfc8656.html).
-
-Include the relay when measuring the route. Its effect on delay depends on where it runs and the network conditions.
-
-WebRTC also supports ways through networks that block UDP, including TURN over TCP or TLS. TCP’s ordered delivery can make later data wait for earlier lost data on that connection. An audio application still has playback deadlines. [WebRTC transport requirements](https://www.rfc-editor.org/rfc/rfc8835.html).
-
-Write down the selected route in a test report. “Same code, different Wi-Fi” can mean a different transport path.
-
-![A browser can reach the media server directly or through a TURN relay. The server forwards media to the agent.](./images/webrtc/04-routes.webp)
-
+<span id="turn-relays" aria-hidden="true" />
 <span id="connected-doesnt-yet-mean-readable-audio" aria-hidden="true" />
+<span id="transport-security" aria-hidden="true" />
 
-### Transport Security
+<details>
+<summary>The connection protocols, if you need them</summary>
 
-The endpoints establish security using **DTLS**, Datagram Transport Layer Security. DTLS-SRTP derives keys used to protect the media with **SRTP**, Secure Real-time Transport Protocol.
+**Signalling** carries setup messages through an application-chosen channel, such as a WebSocket. **SDP** describes the session, including codecs and connection information. An offer sent over a WebSocket doesn't mean microphone audio follows it. See the [WebRTC API](https://www.w3.org/TR/webrtc/) and [ICE offer/answer specification](https://www.rfc-editor.org/rfc/rfc8839.html).
 
-Voice packets use SRTP. They don’t travel inside the DTLS connection used by a WebRTC data channel. [WebRTC security architecture](https://www.rfc-editor.org/rfc/rfc8827.html).
+**ICE** tests candidate pairs and selects a working path. Local addresses, public mappings discovered with **STUN**, and relay addresses provide possible candidates. It doesn't search the internet for the globally fastest route. [RFC 8445](https://www.rfc-editor.org/rfc/rfc8445.html).
 
-Check where encryption ends. Transport encryption to a media server doesn’t, by itself, hide the audio from that server. Additional end-to-end encryption is a separate design. An agent expected to understand encrypted audio needs access to the content at an authorised endpoint. [LiveKit encryption overview](https://docs.livekit.io/transport/encryption/).
+A **TURN** relay forwards traffic for as long as its route is in use. Its location and network conditions affect the journey. TURN over TCP or TLS can help on networks that block UDP, although ordered TCP delivery can make later data wait behind earlier lost data. See [RFC 8656](https://www.rfc-editor.org/rfc/rfc8656.html) and [WebRTC transport requirements](https://www.rfc-editor.org/rfc/rfc8835.html).
 
-A packet capture is useful here, but an encrypted payload won’t explain why the recogniser heard “Thursday.” For that, you need evidence from a point where audio is available.
+**DTLS-SRTP** establishes keys for **SRTP**, which protects the media. Voice packets don't travel inside a WebRTC data channel. Encryption to a media server doesn't by itself hide audio from that server; end-to-end encryption is a separate design. An agent must have access to intelligible audio at an authorised endpoint. See the [WebRTC security architecture](https://www.rfc-editor.org/rfc/rfc8827.html) and [LiveKit encryption overview](https://docs.livekit.io/transport/encryption/).
+
+</details>
 
 <span id="c-your-sentence-arrives-in-pieces-why-doesnt-it-sound-that-way" aria-hidden="true" />
+<span id="c-packet-delivery" aria-hidden="true" />
 
-## C: Packet Delivery
+<span id="uneven-arrivals-continuous-audio" aria-hidden="true" />
 
-Each media packet carries more than compressed sound.
+## Jitter Buffering
 
-**RTP**, Real-time Transport Protocol, provides a sequence number, a timestamp, and a source identifier. The sequence number helps identify packet order. The timestamp places the audio on the sender’s media timeline. The source identifier distinguishes streams. [RTP specification](https://www.rfc-editor.org/rfc/rfc3550.html).
+The packets carrying “appointment to Friday” don't necessarily arrive at even intervals. Their RTP sequence numbers help identify order, while RTP timestamps position audio on the sender's media timeline. A timestamp isn't a packet's arrival time. [RTP specification](https://www.rfc-editor.org/rfc/rfc3550.html).
 
-That timestamp is not the wall-clock time at which a packet arrived.
+<figure class="article-illustration">
+  <Image src={jitterImage} alt="Unevenly spaced audio fragments enter a receiver, which sends a continuous waveform to a speaker." widths={[480, 800, 1200, 1672]} sizes="(min-width: 1280px) 784px, (min-width: 1024px) 55vw, (min-width: 832px) 792px, calc(100vw - 40px)" loading="lazy" />
+  <figcaption>Holding a little audio back helps smooth uneven arrivals.</figcaption>
+</figure>
 
-For Opus over RTP, the timestamp clock runs at 48,000 ticks per second. With our 20-millisecond packet example, consecutive packets advance by 960 ticks. That clock rate does not prove your speech recogniser consumes 48 kHz audio. [Opus RTP timestamp rules](https://www.rfc-editor.org/rfc/rfc7587.html#section-4.1).
+For Opus over RTP, that clock runs at **48,000 ticks per second**. Our 20 ms packets advance by 960 ticks, regardless of the sample rate later required by speech recognition. [Opus timestamp rules](https://www.rfc-editor.org/rfc/rfc7587.html#section-4.1).
 
-For example, these four packets could arrive at the following times:
+This synthetic sequence separates the two clocks:
 
-```text
-Packet        RTP timestamp       Arrival at this receiver
-4100          96000               0 ms
-4101          96960              23 ms
-4102          97920              61 ms
-4103          98880              62 ms
-```
+| Packet | RTP timestamp | Arrival at this receiver |
+| --- | --- | --- |
+| 4100 | 96000 | 0 ms |
+| 4101 | 96960 | 23 ms |
+| 4102 | 97920 | 61 ms |
+| 4103 | 98880 | 62 ms |
 
-The timestamps advance evenly, but the arrival times vary.
-
-Playing each packet immediately on arrival would turn network timing into sound timing. The receiver needs some room to absorb that variation.
+The media timestamps advance evenly. The final two packets arrive just a millisecond apart. Playing audio according to arrival time would carry that irregularity into the sound.
 
 <span id="smooth-audio-means-waiting-somewhere" aria-hidden="true" />
+<span id="jitter-buffers" aria-hidden="true" />
 
-### Jitter Buffers
-
-A **jitter buffer** holds arriving media so it can be played in a steadier sequence. More waiting can absorb more variation, but the caller hears the result later.
-
-WebRTC’s NetEq audio receiver also adjusts the audio itself: playback can be accelerated or slowed, missing audio can be concealed, and recovered audio can be joined back into the stream. [NetEq implementation guide](https://webrtc.googlesource.com/src/+/refs/heads/main/modules/audio_coding/neteq/g3doc/index.md).
-
-A recording can sound continuous even when packets arrive late or go missing. The receiver may have filled the gaps.
-
-For a voice agent, that repaired audio can become input to another model. Listen to the audio at that boundary before drawing conclusions from the transcript.
+A **jitter buffer** gives the receiver time to absorb uneven arrivals. The lab below shows the tradeoff: more waiting can save a packet from missing its playback deadline, but delays the stream. Switch between steady and uneven arrivals, then change the playback start. These are illustrative schedules, not measurements from your browser.
 
 <JitterLab client:visible />
 
+A real receiver does more than hold packets. WebRTC's NetEq adapts its buffering, speeds or slows audio, conceals missing stretches, and joins recovered audio back into the stream. Continuous sound can therefore include replacement audio. At the agent, that repaired sound becomes material for recognition. [NetEq implementation guide](https://webrtc.googlesource.com/src/+/refs/heads/main/modules/audio_coding/neteq/g3doc/index.md).
+
 <span id="a-late-packet-may-already-be-useless" aria-hidden="true" />
+<span id="late-packets" aria-hidden="true" />
 
-### Late Packets
-
-Once the receiver has played past a missing stretch of audio, a late packet cannot change what the caller heard.
-
-Retransmission and recovery only help when the repaired media is still usable. WebRTC’s media transport includes feedback and congestion handling, but no mechanism makes arbitrary network delay disappear. [WebRTC media transport](https://www.rfc-editor.org/rfc/rfc8834.html).
-
-I’d test both isolated packet loss and bursts. Losing several consecutive packets leaves a longer gap than losing the same number spread across a sentence.
-
-Use the same input clip, repeat the test, and listen at the receiver. Then compare the task result. Did the agent preserve the date, name, and number you cared about?
-
-Record whether the agent booked the right appointment as well as the packet-loss rate.
-
-![Packets sent evenly arrive unevenly. A jitter buffer delays playback to smooth the timing. Illustrative, not measured.](./images/webrtc/05-jitter-buffer.webp)
+Once playback has passed a missing stretch, a late packet can't change what was heard. Recovery has to meet a useful deadline. A burst of missing packets also removes a longer continuous stretch than the same losses scattered through a sentence, so a loss percentage alone can't establish whether “Friday” survived. [WebRTC media transport](https://www.rfc-editor.org/rfc/rfc8834.html).
 
 <span id="d-the-audio-arrived-did-the-agent-hear-what-you-said" aria-hidden="true" />
-
-## D: Audio Reception
-
-In a room-based setup, a **selective forwarding unit**, or SFU, routes media between participants. The agent can receive a caller’s track as another participant. A media server forwarding a stream and an agent decoding it are different jobs. [LiveKit self-hosting overview](https://docs.livekit.io/transport/self-hosting/).
-
-The model may run in that agent process or behind another connection. Draw that connection too. Calling the whole box “the backend” hides the place where audio might queue or change format.
-
-By the time a speech recogniser consumes the input, someone has decoded the compressed audio into samples. The integration may also resample it, change the number of channels, or collect samples into larger chunks.
-
-At each connection, check the format, sample rate, channel count, chunk duration, and queue behaviour.
-
-Consider a recogniser that expects 16 kHz mono audio. If your decoded stream is 48 kHz, putting `16000` in a request field doesn’t resample it. It only labels the bytes differently. The receiver would interpret the same samples against a different clock.
-
-To check for that mistake, compare the sample count with the expected audio duration.
-
-![Forwarded packets are decoded into audio samples and prepared for speech recognition at the agent.](./images/webrtc/06-decoding.webp)
-
+<span id="d-audio-reception" aria-hidden="true" />
 <span id="your-queue-can-become-the-delay" aria-hidden="true" />
+<span id="queue-delay" aria-hidden="true" />
 
-### Queue Delay
+<span id="a-reproducible-80-ms-delay-before-recognition" aria-hidden="true" />
 
-Suppose an application collects five 20-millisecond chunks before forwarding them. The first chunk spends another 80 milliseconds waiting for the other four to arrive, assuming steady arrival.
+## PCM Batching
 
-This example assumes the application waits for all five chunks. Check how your SDK batches audio before applying that calculation.
+The agent receives decoded samples, then prepares them for speech-to-text. That preparation can change sample rate, channel count, or chunk size. Labelling 48 kHz samples as `16000` doesn't resample them: it tells the receiver to interpret the same samples against a different clock. Sample count divided by samples per second must describe the intended duration.
 
-Ask how long each audio item waits between being produced and being consumed. Queue length alone is ambiguous: ten items could mean ten tiny frames or ten large chunks.
+Even correctly formatted audio can wait in an application queue. The following **synthetic scheduling example** isolates that wait. It uses no microphone, WebRTC connection, or recognition service, and is not a browser benchmark.
 
-If the queue keeps growing, the consumer cannot keep up. Increasing its capacity lets older audio accumulate.
+Suppose five decoded chunks, each representing 20 ms of audio, become ready at 20, 40, 60, 80, and 100 ms. One policy forwards each chunk immediately. Another holds all five until the last is ready. Both receive exactly the same input schedule.
 
-For a controlled test, compare audio after browser processing with audio immediately before recognition. Keep the recording points explicit. Then you can investigate a changed word without guessing which component changed it.
+Run this JavaScript in Node.js or a browser console:
 
-The [phone-line article](/blog/building-a-phone-line-in-pytorch) follows a different audio path through telephony. Its channel assumptions should not be silently applied to a browser’s Opus stream.
+```js
+const readyMs = [20, 40, 60, 80, 100];
+const batchReadyMs = readyMs[readyMs.length - 1];
+
+const rows = readyMs.map((ready, index) => ({
+  chunk: index + 1,
+  readyMs: ready,
+  immediateMs: ready,
+  batchedMs: batchReadyMs,
+  addedWaitMs: batchReadyMs - ready,
+}));
+
+console.table(rows);
+```
+
+All times below are milliseconds. Immediate forwarding matches the ready time.
+
+| Chunk | Ready | Batch sent | Added wait |
+| --- | --- | --- | --- |
+| 1 | 20 | 100 | 80 |
+| 2 | 40 | 100 | 60 |
+| 3 | 60 | 100 | 40 |
+| 4 | 80 | 100 | 20 |
+| 5 | 100 | 100 | 0 |
+
+The first chunk waits **80 ms longer before being forwarded toward STT**. Transport is unchanged in this model; the delay is introduced after chunks are ready. A network trace could look identical under both policies.
+
+The last chunk adds no wait because it completes the batch. This is a bounded collection delay. A queue that grows throughout the call points to a different problem: consumption is falling behind production. Giving that queue more capacity lets it retain older audio; it doesn't make the consumer faster.
+
+This result doesn't promise an 80 ms improvement in the caller's response time. It omits scheduling overhead, recogniser buffering, and downstream work. A recogniser might require larger chunks. The useful finding is narrower: observing chunk readiness and forwarding separately exposes waiting that a single “audio received” timestamp hides.
+
+The [phone-line experiment](/blog/building-a-phone-line-in-pytorch) covers a different channel. Its telephony sample rates and codec assumptions shouldn't be transferred to this browser Opus stream.
 
 <span id="e-you-stopped-speaking-why-is-the-agent-still-waiting" aria-hidden="true" />
+<span id="e-turn-detection" aria-hidden="true" />
 
-## E: Turn Detection
+<span id="the-pause-before-friday" aria-hidden="true" />
 
-Return to the sentence:
+## Turn Detection
 
 “Can I move my appointment to… Friday?”
 
-During the pause before Friday, the speech detector sees silence. You haven’t finished your request yet.
-
-**Voice activity detection**, or VAD, estimates whether audio contains speech. Deciding that your conversational turn is complete needs more context. Depending on the system, that decision can use silence, recogniser events, language context, or a realtime model’s own turn handling. [LiveKit turn handling](https://docs.livekit.io/agents/logic/turns/).
-
-The browser has no protocol message that means “this person has finished explaining their request.” That decision belongs to the conversation system.
+During that pause, a speech detector sees silence, but your request is unfinished. **Voice activity detection (VAD)** estimates whether speech is present. Turn detection decides whether the conversational turn is complete, using signals such as silence, recogniser events, or language context. WebRTC doesn't send a message meaning “this person has finished explaining.” [LiveKit turn handling](https://docs.livekit.io/agents/logic/turns/).
 
 <span id="a-final-transcript-still-needs-a-definition" aria-hidden="true" />
+<span id="transcript-finality" aria-hidden="true" />
 
-### Transcript Finality
-
-A recogniser may finalise a segment while the person intends to continue. Before you use an event as permission to answer, check what that provider means by “final.”
-
-I would test the pause with several continuations: a day, a correction, and a longer explanation. Keep the audio and expected behaviour with the test. Otherwise, a change that makes one short request faster can cut off the next caller.
-
-Waiting longer reduces the risk of cutting someone off, but also delays replies when they have finished.
+A recogniser's “final” result can finish a segment while the person intends to continue. Treating every final segment as permission to answer can cut off the date. Waiting longer helps preserve the continuation, but also delays replies to complete requests. The event's provider-specific meaning belongs in that decision.
 
 <span id="starting-early-makes-cancellation-part-of-the-design" aria-hidden="true" />
+<span id="preemptive-generation" aria-hidden="true" />
 
-### Preemptive Generation
-
-An agent can begin preparing a reply before it is certain you have finished. LiveKit exposes preemptive generation alongside turn and interruption settings. Work started early may need to be discarded when the user continues. [Turn-taking tuning](https://docs.livekit.io/agents/logic/turns/tuning/).
-
-For the appointment example, an early draft might assume the request is complete before “Friday” arrives.
-
-An early draft can be discarded. A booking change may need to be reversed. Decide which operations can run before the caller finishes and which must wait.
-
-The same care applies to reporting speed. If generation overlaps your speech, its duration cannot simply be added to every other stage as though the whole system runs in sequence.
-
-Even with no network problem, the agent may still be waiting for permission to answer.
+An agent can prepare a reply before the turn is confirmed. LiveKit's [preemptive-generation settings](https://docs.livekit.io/agents/logic/turns/tuning/) allow that work to start early and be cancelled when the input changes. For our sentence, an early draft could be obsolete as soon as “Friday” arrives. Discarding a draft is straightforward; changing an appointment early creates an action that might need reversing. Speculation needs a boundary between preparing an answer and committing an action.
 
 <span id="f-the-agent-has-an-answer-why-havent-you-heard-it-yet" aria-hidden="true" />
-
-## F: Reply Playback
-
-After the first text token arrives, the agent still has to generate audio and send it to the caller. Measure each of those steps separately.
-
-A text-to-speech system may need a useful chunk of text before it can produce speech. Your application then has to deliver its output into the media path. The browser receives the returning media and prepares it for playback.
-
-Name these events separately in a trace. LiveKit’s observability data distinguishes model and speech timing measurements, which is useful evidence for the agent’s part of the journey. Check each metric’s start and end points before treating it as the caller’s full waiting time. [Agent observability data](https://docs.livekit.io/testing/observability/data/).
-
-“Audio sent” is especially easy to misread. It could mean added to an application queue, accepted by an SDK, or transmitted as media. Those are different timestamps.
-
+<span id="f-reply-playback" aria-hidden="true" />
 <span id="measure-the-wait-the-caller-experiences" aria-hidden="true" />
+<span id="response-timing" aria-hidden="true" />
 
-### Response Timing
+<span id="when-the-reply-becomes-audible" aria-hidden="true" />
 
-For response delay, I would use this target:
+## Response Latency
+
+The first generated text token isn't sound. Speech synthesis needs usable text, the application must publish its audio, and the returning media passes through the server and browser receiver before reaching the speaker. “Audio sent” might mean queued by the application, accepted by a library, or transmitted. Those events have different timestamps.
+
+For the caller's initial wait, use:
 
 ```text
-first audible agent speech − end of the caller’s speech
+first audible agent speech − end of the caller's speech
 ```
 
-Then record intermediate events to explain that interval:
-
-| Event                                              | Where to observe it                     |
-| -------------------------------------------------- | --------------------------------------- |
-| The caller finishes the utterance                  | A defined capture point near the caller |
-| The corresponding audio reaches the agent          | Agent audio input                       |
-| The turn is accepted as complete                   | Conversation controller                 |
-| The first usable reply text appears                | Model stream or application             |
-| The first generated speech becomes available       | Speech output                           |
-| The returning audio becomes available for playback | Receiving client                        |
-| The caller hears the first speech                  | Acoustic measurement at the output      |
-
-You’ll need measurements from several points in the system. The browser alone cannot report all seven events.
-
-For a lab test of actual audible delay, record input and speaker output on a shared timebase. If you use a browser playback estimate instead, say so. Device output and software playback events are not interchangeable measurements.
-
-Also keep clock boundaries explicit. Two processes can both report “milliseconds since startup” and still have unrelated zeros. Subtracting those timestamps gives you a number with no useful meaning.
-
-Use local elapsed times for local work. To align machines, document the clock alignment and its uncertainty. If your uncertainty is larger than the improvement, the trace doesn’t establish that improvement.
-
 <span id="the-quiet-part-of-the-chart-can-hide-the-problem" aria-hidden="true" />
+<span id="overlapping-work" aria-hidden="true" />
 
-### Overlapping Work
+<ResponseTimeline />
 
-A model trace might show useful work throughout the response. The caller still experiences the gaps between audible turns.
+Recognition can run while you speak. Reply generation can begin before the turn closes, and playback can begin before the whole answer exists. Adding every stage's duration as if they ran sequentially would double-count overlapping work. The relevant chain is the unfinished work holding back the first audible reply.
 
-Keep the overlap visible in your trace. Speech recognition can run while you talk. Generation can start early. Audio can start playing before the entire answer exists.
+Agent metrics can help locate that chain. [LiveKit's observability data](https://docs.livekit.io/testing/observability/data/) separates turn, model, and speech measurements, but their boundaries aren't the speaker's acoustic output. A lab measurement of audible delay needs input and speaker output on a shared timebase. A software playback estimate should be labelled as an estimate.
 
-Look for the chain of unfinished work that is holding back the first audible reply. Shortening work outside that chain may leave the caller’s wait unchanged.
-
-And check the rest of the answer. A fast opening word followed by a long silence is a poor result even if first-audio timing looks good.
-
-![Recognition overlaps speech, and playback can start while reply generation continues. This timeline is conceptual.](./images/webrtc/07-response-timeline.webp)
+Across machines, timestamps need documented clock alignment and uncertainty. Two processes reporting milliseconds since startup have unrelated zeros. If alignment uncertainty exceeds the apparent improvement, the trace doesn't establish that improvement. And first speech is only one boundary: a quick opening word followed by a long silence still makes a poor reply.
 
 <span id="you-interrupt-it-how-much-of-the-old-answer-survives" aria-hidden="true" />
+<span id="actually-monday" aria-hidden="true" />
 
 ## Interruption Handling
 
-The agent starts saying, “I can move your appointment to Friday at…”
+The agent starts, “I can move your appointment to Friday at…” You interrupt: “Actually, Monday.”
 
-You say, “Actually, Monday.”
+<figure class="article-illustration">
+  <Image src={interruptionImage} alt="A woman raises her hand while speaking to her laptop; her dark voice wave passes above a fading pale reply." widths={[480, 800, 1200, 1672]} sizes="(min-width: 1280px) 784px, (min-width: 1024px) 55vw, (min-width: 832px) 792px, calc(100vw - 40px)" loading="lazy" />
+  <figcaption>Stopping the reply means clearing queued audio as well as cancelling generation.</figcaption>
+</figure>
 
-The new audio travels through the incoming path while old audio may still be travelling out. Detecting the interruption is only the start of responding to it.
+Your correction travels inward while old reply audio is still travelling outward. Recognising the interruption doesn't empty those paths. The application needs to stop generation, clear pending speech, and reject chunks that arrive after cancellation. A response ID lets downstream consumers distinguish cancelled output from the new answer.
 
-I would inspect four things in the application: whether generation stops, whether queued speech is cleared, whether late output is rejected, and whether conversation history reflects what was actually delivered.
-
-Give each response an ID. When that response is cancelled, downstream consumers reject later chunks belonging to it. Cancelling one asynchronous request does not prove every task it started has stopped producing output.
-
-There is also audio you can no longer take back. Samples already played are part of the conversation. Packets already sent may still be in transit or receiver buffers.
-
-Measure how long the old reply remains audible after the caller interrupts.
-
-![An interruption cancels generation and clears pending audio. Audio in transit may still arrive, and audio already heard cannot be recalled.](./images/webrtc/08-interruption.webp)
+Cancelling one asynchronous request doesn't prove that every task it started has stopped. Nor can cancellation recall sound already played. The user-facing measure is how long the old answer remains audible after the correction begins.
 
 <span id="the-next-answer-needs-the-conversation-you-actually-had" aria-hidden="true" />
+<span id="conversation-history" aria-hidden="true" />
 
-### Conversation History
+Conversation history has a similar boundary. If the generated sentence was “Friday at three is available” but the caller heard only “Friday,” storing the whole sentence as delivered makes the next response assume information the caller never received. LiveKit documents [truncating interrupted history to the played portion](https://docs.livekit.io/agents/logic/turns/#interruptions). That depends on the system's playback information, so the saved conversation is part of an interruption test.
 
-Suppose the full generated sentence was “Friday at three is available,” but the caller only heard “Friday.” Saving the full sentence as delivered history can mislead the next response.
-
-LiveKit documents interruption handling that truncates history to the played portion. For any stack, inspect how it estimates that boundary and what happens when playback information is delayed. [Interruption handling](https://docs.livekit.io/agents/logic/turns/#interruptions).
-
-Finally, include the speaker in your test. The agent’s own output can return through the microphone. Test with headphones and with the device speaker, and compare the captured audio when investigating false interruptions.
-
-After stopping playback, check the saved conversation too. It should reflect the part of the reply the caller heard.
-
-<span id="if-the-call-feels-wrong-where-do-you-look-first" aria-hidden="true" />
-
-## Finding the Bottleneck
-
-![Start with connection setup for slow joins, delivery and reception for broken audio, recognition for wrong words, and cancellation for speech that continues after interruption.](./images/webrtc/09-debugging-guide.webp)
-
-Start by naming the symptom. “Latency” is too broad to choose a useful measurement.
-
-| What you observe                            | What I would check first                                            |
-| ------------------------------------------- | ------------------------------------------------------------------- |
-| Joining is slow, but later turns are fine   | Signalling, candidate checks, security setup, and agent readiness   |
-| Audio breaks up during speech               | Arrival timing, loss, receiver concealment, and CPU pressure        |
-| The transcript changes a critical word      | Audio at the recognition boundary, followed by recogniser behaviour |
-| The agent waits after complete requests     | Turn decisions and the events they depend on                        |
-| Speech is generated promptly but heard late | Application queues, return transport, and receiving playback        |
-| Old speech continues after an interruption  | Cancellation propagation, queued output, and late chunks            |
-
-Use these checks to narrow down the cause. Keep the same utterance and change one condition at a time.
-
-For the browser leg, `RTCPeerConnection.getStats()` exposes transport and media observations. Read inbound audio statistics as evidence about audio received by that browser. They do not describe the microphone audio arriving at the agent.
-
-Two useful measurements are receiver concealment and time spent in the jitter buffer. The buffer counters are cumulative: use the change in delay divided by the change in emitted count for a sampling interval. The result is an average, not a momentary peak. Compare the same stream, and skip intervals where the emitted count does not increase or the counters reset. Fields also vary in browser support. [WebRTC statistics specification](https://www.w3.org/TR/webrtc-stats/).
-
-A candidate pair’s round-trip time measures a network round trip. Halving it does not establish one-way delay, because the two directions can differ.
-
-Collect agent-side evidence for the other direction. Attach the session identity, stream direction, and observation point to both sets of measurements.
-
-Save the input audio, browser and SDK versions, selected route, negotiated codec, and logs. You’ll need them to compare runs.
-
-Repeat the sentence with a pause before Friday, during the agent’s reply, and under a controlled burst of packet loss. Compare where each run first differs.
-
-<span id="now-put-the-whole-call-together" aria-hidden="true" />
-
-## System Architecture
-
-The opening diagram followed one sentence. This view shows where those jobs run in the room-based system we used throughout the article.
-
-![WebRTC system architecture: the browser captures and encodes caller audio, an SFU forwards it to the agent receiver, and the conversation controller calls STT, LLM, and TTS services. Reply audio returns through the SFU to the browser's jitter buffer, decoder, and speaker. Connection setup sits apart from both media directions.](./images/webrtc/10-system-architecture.webp)
-
-**A lives in the browser.** The microphone, capture processing, and encoder prepare the outgoing audio. **B establishes each WebRTC connection** through signalling, ICE, and security setup. It is drawn above the media path because it does not process every spoken sentence.
-
-**C spans the media connections.** The browser connects to the SFU, and the agent has its own WebRTC leg. Either leg may need TURN. The SFU forwards tracks; the speech models do not run inside it in this example.
-
-**D sits at the agent's receiving boundary.** The receiver buffers and decodes the incoming audio before the application prepares samples for recognition. **E manages the conversation**, including model calls, turn decisions, tools, and interruptions. The model services can run locally or behind remote APIs. Their connections are separate from the WebRTC media legs.
-
-**F crosses back through the system.** The agent publishes generated audio, the SFU forwards it, and the browser buffers, decodes, and plays it. That is why F appears at both ends of the return path.
-
-These arrows show connections, not a schedule. Recognition can run while you speak. Reply audio can play while more speech is being generated. Your microphone can keep sending audio throughout, which lets the agent hear an interruption.
-
-<span id="open-the-box-where-the-evidence-points" aria-hidden="true" />
-
-## Follow the Evidence
-
-When a call goes wrong, compare recordings and timings at each stage. Find the first point where they differ from what you expected, then investigate that part of the system.
-
-[_WebRTC for the Curious_](https://webrtcforthecurious.com/) is worth reading alongside this article for a deeper treatment of the protocols. Use the same sentence in a controlled call and add your own timings to this map.
+Speaker output can also return through the microphone and resemble new speech. Comparing headphones with the device speaker helps separate a real correction from a false interruption caused by the agent's own audio.
 
 <span id="a-short-glossary-if-you-need-it" aria-hidden="true" />
+<span id="technical-glossary" aria-hidden="true" />
 
-## Technical Glossary
+<details>
+<summary>A short glossary</summary>
 
-| Term                            | Meaning here                                                                                                                                 |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| **WebRTC**                      | Web Real-Time Communication: APIs and protocols for realtime media and data connections.                                                     |
-| **Sample rate**                 | The number of audio samples representing one second, measured per channel.                                                                   |
-| **Codec / Opus**                | A codec encodes and decodes media. Opus is the audio codec used in this example.                                                             |
-| **Frame / packet**              | A frame represents a stretch of encoded audio. A network packet carries data and headers; the two are not always one-to-one.                 |
-| **Signalling / SDP**            | Signalling exchanges setup information. Session Description Protocol is a format used to describe the session.                               |
-| **NAT**                         | Network Address Translation: address mapping that can affect which endpoints are reachable.                                                  |
-| **ICE / candidate pair**        | Interactive Connectivity Establishment tests possible connections. A pair identifies the local and remote candidates for a path.             |
-| **STUN / TURN**                 | Session Traversal Utilities for NAT helps discover mappings and check connectivity. Traversal Using Relays around NAT provides a relay.      |
-| **UDP / TCP / TLS**             | User Datagram Protocol, Transmission Control Protocol, and Transport Layer Security. They provide different transport or security functions. |
-| **DTLS / SRTP**                 | Datagram Transport Layer Security and Secure Real-time Transport Protocol. WebRTC uses them to establish keys and protect media.             |
-| **RTP / timestamp**             | Real-time Transport Protocol carries media timing information. An RTP timestamp belongs to a media clock.                                    |
-| **Jitter buffer / concealment** | The receiver smooths uneven arrival timing. Concealment supplies replacement audio when needed.                                              |
-| **SFU**                         | Selective forwarding unit: a media server that forwards streams to receiving participants.                                                   |
-| **VAD / turn detection**        | Voice activity detection estimates speech activity. Turn detection decides when to treat the conversational turn as complete.                |
-| **STT / LLM / TTS**             | Speech-to-text, large language model, and text-to-speech: the example agent’s recognition, response, and speech stages.                      |
-| **SDK / CPU**                   | Software development kit and central processing unit: the integration library and the processor doing the work.                              |
-| **Playout**                     | The process of delivering received audio for playback. A software event is not necessarily the moment sound leaves the speaker.              |
+- **Sample rate:** samples representing one second of audio, per channel.
+- **Codec / Opus:** a codec encodes and decodes audio; Opus is the codec assumed here.
+- **Frame / packet:** a frame represents encoded audio over time; a network packet carries data and headers. They aren't necessarily one-to-one.
+- **RTP timestamp:** position on a media clock, rather than a wall-clock arrival time.
+- **Jitter / concealment:** variation in arrival timing; replacement audio used to cover a missing stretch.
+- **SFU:** selective forwarding unit, a media server that forwards participant streams.
+- **STT / LLM / TTS:** speech-to-text, large language model, and text-to-speech.
+- **Playout:** delivering received audio for playback; a software event needn't coincide with sound leaving the speaker.
+
+</details>
+
+<span id="if-the-call-feels-wrong-where-do-you-look-first" aria-hidden="true" />
+<span id="open-the-box-where-the-evidence-points" aria-hidden="true" />
+<span id="follow-the-evidence" aria-hidden="true" />
+
+<span id="finding-the-bottleneck" aria-hidden="true" />
+
+## Pipeline Diagnostics
+
+A trace needs a direction and an observation point. Browser inbound-audio statistics concern the reply arriving at the browser, not microphone audio reaching the agent. Collect agent-side evidence for the incoming sentence.
+
+For the browser leg, `RTCPeerConnection.getStats()` can expose concealment and jitter-buffer counters. To calculate average buffer residence over an interval, divide the change in `jitterBufferDelay` by the change in `jitterBufferEmittedCount`. That's an interval average, not an instantaneous peak. Compare the same stream; skip resets and intervals with no emitted samples, and account for browser support. A candidate pair's round-trip time also doesn't establish one-way delay when halved. [WebRTC statistics specification](https://www.w3.org/TR/webrtc-stats/).
+
+| What you observe | First useful evidence |
+| --- | --- |
+| Slow join, normal later turns | Signalling, candidate checks, security setup, agent readiness |
+| Broken audio during speech | Receiver arrival timing, loss and concealment; processing load |
+| “Friday” becomes another word | Audio immediately before recognition, then the recogniser output |
+| A reply starts before “Friday” | Speech activity, transcript events, and the turn-complete decision |
+| Generated speech is heard late | Queue readiness and forwarding timestamps, return path, playback |
+| Friday speech continues after “Monday” | Cancellation propagation, pending audio, late response chunks |
+
+For the next test, replay one fixed “Can I move my appointment to… Friday?” recording through your integration. Capture audio after browser processing and immediately before recognition, and timestamp chunk readiness, forwarding, turn completion, and first playback. Keep the session ID, observation points, browser and library versions, selected route, and codec with the run. Change one condition, such as application batching, and repeat. The first boundary where the recordings or timings diverge gives you a specific component to investigate.

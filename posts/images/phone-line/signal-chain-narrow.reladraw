@@ -1,0 +1,22 @@
+// Compact rendering of the same offline channel approximation.
+diagram theme: light background: #fcfcfc text: (color: #0a0a0a)
+default node text: (size: 18) fill: #fcfcfc border: #95959d
+default edge line: #6f3fb0 line: (path: curved)
+style dim text: (color: #55555c)
+style stage fill: #f2f2f3 border: #95959d
+
+node input "Float PCM / [dim]native rate[/dim]" icon: package
+node dsp "Preprocessing" style: stage contents: (align: center) below input (gap: tight)
+node dsp.filters "300 Hz high-pass / 3.4 kHz low-pass" icon: cube
+node dsp.resample "Sinc resampler / [dim]8 kHz PCM[/dim]" icon: cube below dsp.filters (gap: tight)
+node codec "Channel approximation" style: stage contents: (align: center) below dsp
+node codec.quantizer "μ-law quantizer / [dim]256 levels[/dim]" icon: cube
+node codec.erasure "20 ms frame erasure / [dim]160 encoded samples[/dim]" icon: package below codec.quantizer (gap: tight)
+node codec.decode "μ-law expansion" icon: cube below codec.erasure (gap: tight)
+node output "Float PCM / 8 kHz" shape: document below codec (gap: tight)
+edge input -> dsp from: bottom to: top
+edge dsp.filters -> dsp.resample from: bottom to: top
+edge dsp -> codec from: bottom to: top
+edge codec.quantizer -> codec.erasure from: bottom to: top
+edge codec.erasure -> codec.decode from: bottom to: top
+edge codec -> output from: bottom to: top

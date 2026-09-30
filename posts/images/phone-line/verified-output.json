@@ -1,0 +1,68 @@
+{
+  "runtime": {
+    "python": "3.12.11 (main, Sep  2 2025, 14:12:30) [Clang 20.1.4 ]",
+    "torch": "2.8.0",
+    "torchaudio": "2.8.0",
+    "device": "cpu"
+  },
+  "fixture": {
+    "sample_rate": 24000,
+    "tone_seconds": 1,
+    "amplitude": 0.1,
+    "discard_seconds": 0.5,
+    "lowpass_hz": 3400
+  },
+  "qs": [
+    0.5097955791041592,
+    0.6013448869350453,
+    0.8999762231364156,
+    2.5629154477415055
+  ],
+  "lowpass_db": {
+    "torch.float32": {
+      "3400": {
+        "single": -3.010303020477295,
+        "butterworth8": -3.0103020668029785,
+        "repeated_q": -12.041204452514648
+      },
+      "6000": {
+        "single": -13.079298973083496,
+        "butterworth8": -51.30361557006836,
+        "repeated_q": -52.199554443359375
+      }
+    },
+    "torch.float64": {
+      "3400": {
+        "single": -3.0102999566398125,
+        "butterworth8": -3.0102999566398143,
+        "repeated_q": -12.041199826559254
+      },
+      "6000": {
+        "single": -13.079317578143586,
+        "butterworth8": -51.44065489530411,
+        "repeated_q": -52.31727031257429
+      }
+    }
+  },
+  "torchaudio_zero": {
+    "encoded": 128,
+    "decoded": 8.621309098089114e-05
+  },
+  "pcmu_zero": {
+    "encoded_hex": "ff",
+    "decoded_int16": 0
+  },
+  "ste": {
+    "tested_samples": 2000001,
+    "arithmetic_mismatches": 3766,
+    "arithmetic_max_abs_error": 7.275957614183426e-12,
+    "custom_forward_equal": true,
+    "first_mismatch": {
+      "x": -2.5175966584356502e-05,
+      "exact": -8.621169399702922e-05,
+      "arithmetic": -8.62116867210716e-05
+    },
+    "custom_gradient_all_ones": true
+  },
+  "compand_gradient_at_zero": 0.0
+}

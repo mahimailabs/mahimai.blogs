@@ -1,0 +1,20 @@
+// Compact view of the same recognition and rescoring paths.
+diagram theme: light background: #fcfcfc text: (color: #0a0a0a)
+default node text: (size: 18) fill: #fcfcfc border: #95959d
+default edge line: #55555c line: (path: curved)
+style dim text: (color: #55555c)
+style retained fill: #f2f2f3 border: #6f3fb0
+
+node audio "Audio input" icon: package
+node asr "ASR recognition" icon: cube below audio (gap: tight)
+node archive "Retain evidence" below asr style: retained contents: (align: center)
+node archive.raw "Raw transcript" shape: document
+node archive.meta "Model + audio IDs / run configuration" (size: 18, wrap: 22, color: #55555c) shape: none below archive.raw (gap: tight)
+node scorer "Versioned / scorer" icon: cube below archive
+node reference "Reference / transcript" shape: document left of scorer (gap: tight)
+node metric "Error counts / + WER" shape: document below scorer (gap: tight)
+edge audio -> asr from: bottom to: top
+edge asr -> archive from: bottom to: top
+edge archive -> scorer "rescore" (size: 18, color: #6f3fb0) from: bottom to: top line: #6f3fb0
+edge reference -> scorer from: right to: left
+edge scorer -> metric from: bottom to: top line: #6f3fb0

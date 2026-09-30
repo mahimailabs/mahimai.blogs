@@ -1,106 +1,139 @@
 ---
 title: 'Your smoke run is lying to you'
-description: 'A 12-utterance smoke run produced two confident, completely false results, and both looked fine. What a benchmark resolution is, and why it is not a detail.'
+description: 'A 12-utterance speech benchmark can check the pipeline and still mislead you. Inspect category coverage, WER error counts, loss masks, and scoring provenance.'
 pubDate: 2026-08-18
+updatedDate: 2026-09-30
 tags: ['benchmarking', 'evaluation', 'telephony']
 author: 'Mahimai Raja J'
+cover: ./images/smoke-run/smoke-cover.webp
+coverAlt: An audio engineer examines a few waveform cards beside a larger archive of varied test samples.
+socialImage: ./images/smoke-run/smoke-social.jpg
 ---
 
-import Figure from '../../components/blog/Figure.astro';
+import { Image } from 'astro:assets';
+import coverImage from './images/smoke-run/smoke-cover.webp';
 import SamplingCollapse from '../../components/blog/figures/SamplingCollapse.astro';
 import BenchmarkResolution from '../../components/blog/figures/BenchmarkResolution.astro';
+import TranscriptProvenance from '../../components/blog/figures/TranscriptProvenance.astro';
 
-We run a cheap version of our benchmark before the expensive one. 12 utterances instead of 300, about a dollar instead of five. It exists to prove the wiring works before we spend real money.
+<Image
+  src={coverImage}
+  alt="An audio engineer examines a few waveform cards beside a larger archive of varied test samples."
+  widths={[480, 800, 1200, 1600]}
+  sizes="(min-width: 1280px) 784px, (min-width: 1024px) 55vw, (min-width: 832px) 792px, calc(100vw - 40px)"
+  loading="eager"
+  fetchpriority="high"
+  class="article-cover"
+/>
 
-It did prove the wiring works. It also produced two results that were completely false, and both of them looked fine.
+Our 12-utterance smoke run completed every stage of a text-to-speech benchmark: synthesise the prompt, transform the audio, transcribe it, and score the transcript. Two synthesis systems, four audio conditions, neatly formatted scores. It looked ready for a larger run.
 
-## The first lie: every condition identical
+The sample contained only digits.
 
-Four conditions. Wideband is the control with no phone line at all. Clean is the full G.711 chain. Then 1 percent and 3 percent packet loss.
+Once we fixed the selection, the scores started moving. A difference of one recognised word was enough to reverse the ordering. Then a scoring fix landed while the larger run was already running, and the process kept using the old code.
 
-```
-piper             wideband 7.09%   clean 7.09%   loss_1pct 7.09%   loss_3pct 7.09%
-zipvoice_distill  wideband 7.09%   clean 7.09%   loss_1pct 7.09%   loss_3pct 7.09%
-```
+These failures need different checks: **inspect the sample, keep the error counts, and record which scorer produced them**. A successful process exit can't tell you any of that.
 
-Identical to two decimal places, across two completely different systems, including a control with no codec applied. That is not a result, that is a bug.
+<span id="the-first-lie-every-condition-identical" aria-hidden="true" />
 
-Except the codec was fine. We checked it directly: clean genuinely differs from wideband, and the loss conditions genuinely drop the right number of 20 ms frames.
+## Sample Coverage
 
-The actual cause was the sampling. Our text set is stored grouped by category, and the smoke run took the first 12 rows:
+The first smoke run selected the beginning of a category-sorted corpus:
 
 ```python
 utterances = loader.load()[:limit]
 ```
 
-The first 60 rows are all digits. So the smoke run was 12 digit utterances and nothing else. Not a smaller version of the benchmark, a different benchmark: the per-category table collapsed to one row, and the prose, proper-noun and address paths were never exercised at all.
+The first 60 entries in [handset-bench's text set](https://github.com/mahimailabs/handset-bench/blob/651ce772ba08ab56dd1b057d3b2ac9304c6eeb4a/src/handset_bench/textset/dialtone_v1.jsonl) are digit prompts. Taking twelve of them never exercises the other five categories: proper nouns, addresses, dates/times/money, conversational text, and general text.
 
-The fix is to spread the sample across categories:
+The early output reported 7.09% word error rate (WER) in every condition for both Piper and ZipVoice-Distill. That repetition was a useful reason to investigate. It wasn't proof that the audio transform was broken: different recordings can produce the same transcript, error count, or rounded percentage.
+
+Checking the selected IDs exposed the coverage problem. The project's [round-robin sampler](https://github.com/mahimailabs/handset-bench/blob/651ce772ba08ab56dd1b057d3b2ac9304c6eeb4a/src/handset_bench/textset/loader.py#L84-L109) spreads a small run across categories:
 
 ```python
-utterances = loader.sample(loader.load(), limit)   # 2 from each of 6 categories
+utterances = loader.sample(loader.load(), 12)
+# Two utterances from each of six categories.
 ```
 
-<Figure label="Not a smaller benchmark, a different one"><SamplingCollapse /></Figure>
+<SamplingCollapse />
 
-## The second lie: more packet loss helps
+This gives each category a chance to fail. It does **not** reproduce the full corpus's category proportions, and two examples can't establish performance within a category. It's a coverage check before committing to a larger run.
 
-With stratified sampling, the numbers finally varied. They also said this:
+<span id="the-second-lie-more-packet-loss-helps" aria-hidden="true" />
 
-```
-piper             wideband 1.75%   clean 0.88%   loss_1pct 1.75%   loss_3pct 0.88%
-zipvoice_distill  wideband 0.00%   clean 0.88%   loss_1pct 3.51%   loss_3pct 1.75%
-```
+## Metric Resolution
 
-Both systems score better at 3 percent packet loss than at 1 percent. That one is not defensible. Loss is strictly additive: the 3 percent condition drops every frame the 1 percent condition drops and then some, so it cannot come out ahead.
+The revised smoke run had 114 reference words after normalisation. These are the error counts recorded in the original debugging write-up:
 
-We first wrote that the other reversal was impossible too, because Piper scores better after the phone line than before it. That was an overclaim, and worth correcting carefully, because it is the kind of prior that hides a real result. Band-limiting to 300 to 3400 Hz removes high-frequency content, and TTS output often carries artifacts up there that the recogniser trips over. Stripping them can genuinely help. So `clean` beating `wideband` is a claim to investigate, not a contradiction.
+| Audio condition  | Piper errors | ZipVoice-Distill errors |
+| ---------------- | -----------: | ----------------------: |
+| Wideband control |            2 |                       0 |
+| Clean G.711      |            1 |                       1 |
+| 1% packet loss   |            2 |                       4 |
+| 3% packet loss   |            1 |                       2 |
 
-The loss ordering is the check that actually holds. Keep the checks that follow from the physics, and be suspicious of the ones that only follow from intuition.
+Here, “errors” means substitutions plus deletions plus insertions. Corpus WER divides that total by the total reference-word count; it isn't the average of each utterance's percentage. The project's [WER implementation](https://github.com/mahimailabs/handset-bench/blob/651ce772ba08ab56dd1b057d3b2ac9304c6eeb4a/src/handset_bench/metrics/wer.py) uses this aggregation.
 
-Look at the raw counts instead of the percentages:
+One error in this sample changes WER by **100 / 114 = 0.877 percentage points**. Piper's 1.75% versus 0.88% is two errors versus one. Reporting two decimal places doesn't create more evidence.
 
-```
-piper             2 errors   1   2   1
-zipvoice_distill  0 errors   1   4   2
-```
+<BenchmarkResolution />
 
-114 reference words in total. The entire run turns on between zero and four word errors. One error is worth 0.88 percentage points, so a single word Whisper heard differently flips the ranking.
+The 300-utterance corpus has 2,904 reference words under the checked normaliser, so its one-error increment is about 0.034 percentage points. That is finer numerical resolution, **not a confidence interval or a guarantee that a ranking will hold**. The result still depends on which utterances, voices, recordings, and loss realisations you evaluated.
 
-There is no bug here. This is what noise looks like when your denominator is 114.
+These small-run numbers are historical debugging observations, not a current model leaderboard. The original smoke-run manifests aren't available with this article; the public implementation and retained larger-run records support the sampling and denominator checks, not a fresh reproduction of that table.
 
-<Figure label="A benchmark has a resolution"><BenchmarkResolution /></Figure>
+## Loss Ordering
 
-## The third lie: the code you edited is not the code that ran
+More packet loss does not force WER to increase on every clip or small sample. Recognition is a separate transformation of the damaged audio. A changed sound can produce fewer word errors, even when the audio has lost more information.
 
-The last one caught us after the small run, on the expensive one.
+The earlier version of this article claimed that the 3% condition removed every frame removed by the 1% condition, plus more. The implementation doesn't do that: its random seed includes the **condition name**, so the two conditions use different draws. They can lose different parts of a sentence. The [codec implementation](https://github.com/mahimailabs/handset-bench/blob/651ce772ba08ab56dd1b057d3b2ac9304c6eeb4a/src/handset_bench/codec.py) makes that distinction explicit.
 
-We found a bug in our text normalisation and fixed it. Six minutes earlier we had started a 300 utterance run, and scoring happens locally in that same process. Python loads a module once, at import. The edit changed the file on disk and nothing in the running interpreter, so all 300 utterances were scored by the code we had just deleted.
+Even deliberately nested masks would constrain the missing frames, not the recogniser's error count. The [published full-run findings](https://github.com/mahimairaja/DialTone-TTS/blob/28a1536da3f5749c904ec549616706a999856de9/docs/baseline-findings.md) contain the same reversal: ZipVoice scores 4.34% WER at 1% loss and 4.30% at 3%. That directly contradicts the original rule.
 
-The output looked completely normal. Nothing warns you about this.
+A reversed score is a prompt to inspect the changed transcripts. To isolate the loss effect, hold the source recording fixed, save the masks or their seeds, and repeat across loss realisations. Check the transformation itself for dropped-frame counts. Don't use the expected WER ordering as a substitute for that check.
 
-Worse, the records stored only the derived word error rate, not the transcripts. The transcripts are the expensive artefact: they cost GPU time, and everything after them is arithmetic. Discarding them meant a bug in the arithmetic cost another full run.
+For the audio side of this experiment, see [the PyTorch phone-line implementation](/blog/building-a-phone-line-in-pytorch). For a live receiver, [WebRTC jitter buffering](/blog/how-your-voice-travels-through-webrtc#jitter-buffering) adds playout deadlines and concealment that an offline loss mask doesn't reproduce.
 
-Two fixes, and the second is the one that matters:
+<span id="the-third-lie-the-code-you-edited-is-not-the-code-that-ran" aria-hidden="true" />
 
-Kill the run before changing anything it imports. An edit mid-flight is not applied, it is ignored.
+## Run Provenance
 
-And store the transcripts in the record. Scoring is cheap and it will change; the audio is expensive and it will not. Now a normalisation change is re-scored offline for nothing:
+Editing a Python file doesn't update a module already imported by an ordinary running process. Python normally checks its module cache on import; [its import documentation](https://docs.python.org/3/reference/import.html#the-module-cache) describes that behaviour.
+
+We changed the text normaliser after a 300-utterance run had started. That process continued scoring with the version it had loaded earlier. Its output looked normal because, from the process's point of view, nothing had changed.
+
+The costly mistake was saving only derived scores. Without the raw hypotheses, a correction to [digit normalisation](/blog/the-normaliser-that-scored-itself) required recognition to run again.
+
+<TranscriptProvenance />
+
+Keep the raw reference and hypothesis, utterance ID, condition, model identity, and scorer revision with each result. Retain the source audio or a stable reference to it when you need to investigate recognition itself. A cached transcript lets you change text scoring; it cannot test a different recogniser or repair missing audio.
+
+For records containing transcripts, the project's [rescoring command](https://github.com/mahimailabs/handset-bench/blob/651ce772ba08ab56dd1b057d3b2ac9304c6eeb4a/src/handset_bench/rescore.py) supports a dry run before overwriting results:
 
 ```bash
+# Inspect the rescored output without changing records.
+handset-bench rescore --results results
+
+# Archive the original records before writing new scores.
 handset-bench rescore --results results --write
 ```
 
-## The rule
+The Modal scoring path stores these transcripts; the generic runner currently does not. Check the actual record before relying on rescoring. The command also leaves the existing revision metadata unchanged, so record the new scoring revision alongside the rescored output.
 
-A benchmark has a resolution, and it is not a detail. At 300 utterances our denominator is about 2,900 words and one error moves the number by 0.03 points. At 12 it is 0.88 points, which is larger than every effect we are trying to measure.
+Pin the code revision at launch. If a scoring fix arrives during a run, either restart with the fix or finish collecting reusable transcripts and rescore them explicitly. Record both revisions so the resulting number has a traceable origin.
 
-Three things follow, and they generalise past telephony:
+<span id="the-rule" aria-hidden="true" />
 
-A smoke run is a wiring check. It answers "did every stage execute", never "which system is better". Do not read its numbers as results, and do not put them in a table that looks like results.
+## Promotion Checks
 
-If your smoke run samples the first N rows of a sorted file, it is not sampling. Check what your subset actually contains before you trust anything it tells you.
+Before a smoke run earns a larger run, its output should answer these questions:
 
-And keep whatever was expensive to produce. If you throw away the transcripts, every future bug in how you score them is billed to you again.
+| Check                                          | Evidence to keep                                                 |
+| ---------------------------------------------- | ---------------------------------------------------------------- |
+| Did every intended category run?               | Selected utterance IDs and category counts.                      |
+| Did the audio conditions differ as configured? | Audio hashes, transform settings, realised loss counts.          |
+| What moved the score?                          | Substitutions, deletions, insertions, and reference-word totals. |
+| Can this score be reproduced?                  | Input, model, seed, and scorer identities.                       |
+| Can scoring be fixed cheaply?                  | Raw references and hypotheses, saved before normalisation.       |
 
-The reassuring part is that both lies were catchable from the output alone. Identical values where they should differ, and non-monotonic values where the ordering is physically fixed, are both visible without knowing anything about the system. Look for the result that cannot be true, rather than the one you were hoping for.
+A smoke run has done its job when it exposes broken wiring and missing coverage. A model comparison needs a separate argument about the sample and the uncertainty. Keep that distinction visible in the report, and keep the transcripts that let you revisit it.

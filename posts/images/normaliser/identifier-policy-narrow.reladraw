@@ -1,0 +1,21 @@
+// Same fixture and benchmark policy, compact reading order.
+diagram theme: light background: #fcfcfc text: (color: #0a0a0a)
+default node text: (size: 18) fill: #fcfcfc border: #95959d
+default edge line: #6f3fb0 line: (path: curved)
+style dim text: (color: #55555c)
+style group fill: #f2f2f3 border: #95959d
+
+node inputs "Phone-number forms" style: group contents: (align: center)
+node inputs.spoken "six one three / five five five / zero one nine eight" shape: document
+node inputs.grouped "613 555 0198" shape: document below inputs.spoken (gap: tight)
+node inputs.bracketed "(613) 555-0198" shape: document below inputs.grouped (gap: tight)
+node inputs.joined "6135550198" shape: document below inputs.bracketed (gap: tight)
+node policy "Benchmark policy" style: group contents: (align: center) below inputs (gap: tight)
+node policy.protect "Preserve bracket contents / pre-split digits" icon: cube
+node policy.normalise "Whisper English / [dim]normalisation[/dim]" icon: cube below policy.protect (gap: tight)
+node policy.atomise "Post-split digits / map digit words" icon: cube below policy.normalise (gap: tight)
+node output "6 1 3 5 5 5 0 1 9 8 / [dim]10 reference tokens[/dim]" shape: document below policy (gap: tight)
+edge inputs -> policy from: bottom to: top
+edge policy.protect -> policy.normalise from: bottom to: top
+edge policy.normalise -> policy.atomise from: bottom to: top
+edge policy -> output from: bottom to: top

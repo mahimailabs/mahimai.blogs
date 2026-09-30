@@ -1,0 +1,25 @@
+// Logical BYOC Cloud services, not a physical server inventory.
+// https://help.genesys.cloud/articles/byoc-cloud-overview/
+// https://help.genesys.cloud/articles/ports-and-services-for-webrtc-phones-under-byoc-cloud/
+diagram theme: light background: #fcfcfc text: (color: #0a0a0a)
+default node text: (size: 18) fill: #fcfcfc border: #95959d
+default edge line: #6f3fb0 line: (path: curved)
+style dim text: (color: #55555c)
+
+node cloud "Genesys Cloud" fill: #f2f2f3 border: #95959d
+node cloud.mark icon: cubes inside cloud top-right
+node cloud.control "Call control / [dim]queue + routing[/dim]" icon: cube
+node cloud.media "Media Tier / [dim]SIP ↔ WebRTC[/dim]" icon: cubes below cloud.control (gap: normal)
+node carrier "PSTN carrier / [dim]SIP edge[/dim]" icon: cube left of cloud (gap: normal) level with cloud.media
+node customer "Customer / phone" shape: none left of carrier
+node agent "Human agent / [dim]Genesys browser[/dim]" icon: desktop right of cloud (gap: normal) level with cloud.media
+node turn "TURN relay / [dim]when required[/dim]" icon: cube below agent (gap: normal)
+
+edge customer <-> carrier from: right to: left
+edge carrier <-> cloud.media "RTP/SRTP" (size: 18) from: right to: left
+edge cloud.media <-> agent "SRTP" (size: 18) from: right to: left
+edge cloud.control <-> agent "HTTPS signaling" (size: 18, color: #55555c) from: right to: top line: #55555c line: (pattern: dashed)
+edge cloud.media <-> turn "relay path" (size: 18, color: #55555c) from: bottom to: left line: #55555c
+edge turn <-> agent from: top to: bottom line: #55555c
+
+node note "ICE selects the path. STUN discovers addresses. / TURN relays media when required or configured." (size: 18, wrap: 58, color: #55555c) shape: none below customer and cloud and agent and turn (gap: normal)

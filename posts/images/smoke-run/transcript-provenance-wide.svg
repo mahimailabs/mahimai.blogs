@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="783" height="483" viewBox="0 0 783 483" font-family="'DejaVu Sans Mono', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace" font-size="14px">
+  <defs>
+    <marker id="arrow-55555c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#55555c"/>
+    </marker>
+    <marker id="arrow-55555c-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#55555c"/>
+    </marker>
+    <marker id="arrow-6f3fb0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6f3fb0"/>
+    </marker>
+    <marker id="arrow-6f3fb0-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6f3fb0"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="783" height="483" fill="#fcfcfc"/>
+  <path d="M333 40 H551 a8 8 0 0 1 8 8 V218 a8 8 0 0 1 -8 8 H333 a8 8 0 0 1 -8 -8 V48 a8 8 0 0 1 8 -8 Z" fill="#f2f2f3" stroke="#6f3fb0"/>
+  <g font-size="18px">
+  <text x="339" y="72.3" fill="#0a0a0a" text-anchor="start">Retain the evidence</text>
+  </g>
+  <path d="M360 88 H516 L532 104 V132 a8 8 0 0 1 -8 8 H360 a8 8 0 0 1 -8 -8 V96 a8 8 0 0 1 8 -8 Z" fill="#fcfcfc" stroke="#95959d"/>
+  <path d="M516 88 V104 H532" fill="none" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="442" y="120.3" fill="#0a0a0a" text-anchor="middle">Raw transcript</text>
+  </g>
+  <g font-size="18px">
+  <text x="350" y="182.3" fill="#55555c" text-anchor="start">Model + audio IDs</text>
+  <text x="350" y="206.3" fill="#55555c" text-anchor="start">run configuration</text>
+  </g>
+  <g transform="translate(185.5 80) scale(2)">
+    <path d="M12 2.6 L20.4 6.800000000000001 L12 11 L3.5999999999999996 6.800000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3.5999999999999996 6.800000000000001 L12 11 L12 19.400000000000002 L3.5999999999999996 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M20.4 6.800000000000001 L12 11 L12 19.400000000000002 L20.4 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <g font-size="18px">
+  <text x="209.5" y="156.3" fill="#0a0a0a" text-anchor="middle">ASR</text>
+  <text x="209.5" y="180.3" fill="#55555c" text-anchor="middle">recognition</text>
+  </g>
+  <g transform="translate(43 80) scale(2)">
+    <path d="M12 2.6 L22 7.4 L12 12.2 L2 7.4 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M2 7.4 L12 12.2 L12 21 L2 16.2 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M22 7.4 L12 12.2 L12 21 L22 16.2 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <g font-size="18px">
+  <text x="67" y="156.3" fill="#0a0a0a" text-anchor="middle">Audio</text>
+  <text x="67" y="180.3" fill="#55555c" text-anchor="middle">input</text>
+  </g>
+  <g transform="translate(418 312.4) scale(2)">
+    <path d="M12 2.6 L20.4 6.800000000000001 L12 11 L3.5999999999999996 6.800000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3.5999999999999996 6.800000000000001 L12 11 L12 19.400000000000002 L3.5999999999999996 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M20.4 6.800000000000001 L12 11 L12 19.400000000000002 L20.4 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <g font-size="18px">
+  <text x="442" y="388.7" fill="#0a0a0a" text-anchor="middle">Versioned scorer</text>
+  </g>
+  <path d="M48 315.4 H160 L176 331.4 V383.4 a8 8 0 0 1 -8 8 H48 a8 8 0 0 1 -8 -8 V323.4 a8 8 0 0 1 8 -8 Z" fill="#fcfcfc" stroke="#95959d"/>
+  <path d="M160 315.4 V331.4 H176" fill="none" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="108" y="347.7" fill="#0a0a0a" text-anchor="middle">Reference</text>
+  <text x="108" y="371.7" fill="#0a0a0a" text-anchor="middle">transcript</text>
+  </g>
+  <path d="M592.5 315.4 H726.5 L742.5 331.4 V383.4 a8 8 0 0 1 -8 8 H592.5 a8 8 0 0 1 -8 -8 V323.4 a8 8 0 0 1 8 -8 Z" fill="#fcfcfc" stroke="#95959d"/>
+  <path d="M726.5 315.4 V331.4 H742.5" fill="none" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="663.5" y="347.7" fill="#0a0a0a" text-anchor="middle">Error counts</text>
+  <text x="663.5" y="371.7" fill="#0a0a0a" text-anchor="middle">+ WER</text>
+  </g>
+  <g font-size="18px">
+  <text x="131.75" y="436.7" fill="#55555c" text-anchor="start">Change the scorer; reuse the recognition output.</text>
+  </g>
+  <path d="M 94 133 C 118 133, 126 133, 150 133" fill="none" stroke="#55555c" stroke-width="1.6" marker-end="url(#arrow-55555c)"/>
+  <path d="M 269 133 C 293 133, 301 133, 325 133" fill="none" stroke="#55555c" stroke-width="1.6" marker-end="url(#arrow-55555c)"/>
+  <path d="M 442 226 C 442 260.56, 442 277.84, 442 312.4" fill="none" stroke="#6f3fb0" stroke-width="1.6" marker-end="url(#arrow-6f3fb0)"/>
+  <rect x="399" y="257.2" width="86" height="24" fill="#fcfcfc"/>
+  <g font-size="18px">
+  <text x="442" y="275.5" fill="#6f3fb0" text-anchor="middle">rescore</text>
+  </g>
+  <path d="M 176 353.4 C 247.8 353.4, 283.7 353.4, 355.5 353.4" fill="none" stroke="#55555c" stroke-width="1.6" marker-end="url(#arrow-55555c)"/>
+  <path d="M 528.5 353.4 C 552.5 353.4, 560.5 353.4, 584.5 353.4" fill="none" stroke="#6f3fb0" stroke-width="1.6" marker-end="url(#arrow-6f3fb0)"/>
+</svg>

@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="711" height="640" viewBox="0 0 711 640" font-family="'DejaVu Sans Mono', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace" font-size="14px">
+  <defs>
+    <marker id="arrow-6f3fb0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6f3fb0"/>
+    </marker>
+    <marker id="arrow-6f3fb0-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6f3fb0"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="711" height="640" fill="#fcfcfc"/>
+  <path d="M48 59 H309 a8 8 0 0 1 8 8 V441 a8 8 0 0 1 -8 8 H48 a8 8 0 0 1 -8 -8 V67 a8 8 0 0 1 8 -8 Z" fill="#f2f2f3" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="54" y="91.3" fill="#0a0a0a" text-anchor="start">Four phone-number forms</text>
+  </g>
+  <path d="M69.5 107 H279.5 L295.5 123 V199 a8 8 0 0 1 -8 8 H69.5 a8 8 0 0 1 -8 -8 V115 a8 8 0 0 1 8 -8 Z" fill="#fcfcfc" stroke="#95959d"/>
+  <path d="M279.5 107 V123 H295.5" fill="none" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="178.5" y="139.3" fill="#0a0a0a" text-anchor="middle">six one three</text>
+  <text x="178.5" y="163.3" fill="#0a0a0a" text-anchor="middle">five five five</text>
+  <text x="178.5" y="187.3" fill="#0a0a0a" text-anchor="middle">zero one nine eight</text>
+  </g>
+  <path d="M107.5 231 H241.5 L257.5 247 V275 a8 8 0 0 1 -8 8 H107.5 a8 8 0 0 1 -8 -8 V239 a8 8 0 0 1 8 -8 Z" fill="#fcfcfc" stroke="#95959d"/>
+  <path d="M241.5 231 V247 H257.5" fill="none" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="178.5" y="263.3" fill="#0a0a0a" text-anchor="middle">613 555 0198</text>
+  </g>
+  <path d="M96.5 307 H252.5 L268.5 323 V351 a8 8 0 0 1 -8 8 H96.5 a8 8 0 0 1 -8 -8 V315 a8 8 0 0 1 8 -8 Z" fill="#fcfcfc" stroke="#95959d"/>
+  <path d="M252.5 307 V323 H268.5" fill="none" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="178.5" y="339.3" fill="#0a0a0a" text-anchor="middle">(613) 555-0198</text>
+  </g>
+  <path d="M118.5 383 H230.5 L246.5 399 V427 a8 8 0 0 1 -8 8 H118.5 a8 8 0 0 1 -8 -8 V391 a8 8 0 0 1 8 -8 Z" fill="#fcfcfc" stroke="#95959d"/>
+  <path d="M230.5 383 V399 H246.5" fill="none" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="178.5" y="415.3" fill="#0a0a0a" text-anchor="middle">6135550198</text>
+  </g>
+  <path d="M381 40 H663 a8 8 0 0 1 8 8 V460 a8 8 0 0 1 -8 8 H381 a8 8 0 0 1 -8 -8 V48 a8 8 0 0 1 8 -8 Z" fill="#f2f2f3" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="387" y="72.3" fill="#0a0a0a" text-anchor="start">Benchmark policy</text>
+  </g>
+  <g transform="translate(498 88) scale(2)">
+    <path d="M12 2.6 L20.4 6.800000000000001 L12 11 L3.5999999999999996 6.800000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3.5999999999999996 6.800000000000001 L12 11 L12 19.400000000000002 L3.5999999999999996 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M20.4 6.800000000000001 L12 11 L12 19.400000000000002 L20.4 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <g font-size="18px">
+  <text x="522" y="164.3" fill="#0a0a0a" text-anchor="middle">Preserve bracket contents</text>
+  <text x="522" y="188.3" fill="#0a0a0a" text-anchor="middle">pre-split digits</text>
+  </g>
+  <g transform="translate(498 218) scale(2)">
+    <path d="M12 2.6 L20.4 6.800000000000001 L12 11 L3.5999999999999996 6.800000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3.5999999999999996 6.800000000000001 L12 11 L12 19.400000000000002 L3.5999999999999996 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M20.4 6.800000000000001 L12 11 L12 19.400000000000002 L20.4 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <g font-size="18px">
+  <text x="522" y="294.3" fill="#0a0a0a" text-anchor="middle">Whisper English</text>
+  <text x="522" y="318.3" fill="#55555c" text-anchor="middle">normalisation</text>
+  </g>
+  <g transform="translate(498 348) scale(2)">
+    <path d="M12 2.6 L20.4 6.800000000000001 L12 11 L3.5999999999999996 6.800000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3.5999999999999996 6.800000000000001 L12 11 L12 19.400000000000002 L3.5999999999999996 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M20.4 6.800000000000001 L12 11 L12 19.400000000000002 L20.4 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <g font-size="18px">
+  <text x="522" y="424.3" fill="#0a0a0a" text-anchor="middle">Post-split digits</text>
+  <text x="522" y="448.3" fill="#0a0a0a" text-anchor="middle">map digit words</text>
+  </g>
+  <path d="M246.5 524 H456.5 L472.5 540 V592 a8 8 0 0 1 -8 8 H246.5 a8 8 0 0 1 -8 -8 V532 a8 8 0 0 1 8 -8 Z" fill="#fcfcfc" stroke="#95959d"/>
+  <path d="M456.5 524 V540 H472.5" fill="none" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="355.5" y="556.3" fill="#0a0a0a" text-anchor="middle">6 1 3 5 5 5 0 1 9 8</text>
+  <text x="355.5" y="580.3" fill="#55555c" text-anchor="middle">10 reference tokens</text>
+  </g>
+  <path d="M 317 254 C 370.17 254, 333.83 141, 387 141" fill="none" stroke="#6f3fb0" stroke-width="1.6" marker-end="url(#arrow-6f3fb0)"/>
+  <path d="M 522 194 C 522 218, 522 194, 522 218" fill="none" stroke="#6f3fb0" stroke-width="1.6" marker-end="url(#arrow-6f3fb0)"/>
+  <path d="M 522 324 C 522 348, 522 324, 522 348" fill="none" stroke="#6f3fb0" stroke-width="1.6" marker-end="url(#arrow-6f3fb0)"/>
+  <path d="M 522 454 C 522 501.52, 520.02 562, 472.5 562" fill="none" stroke="#6f3fb0" stroke-width="1.6" marker-end="url(#arrow-6f3fb0)"/>
+</svg>

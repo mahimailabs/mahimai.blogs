@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1005" height="342" viewBox="0 0 1005 342" font-family="'DejaVu Sans Mono', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace" font-size="14px">
+  <defs>
+    <marker id="arrow-55555c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#55555c"/>
+    </marker>
+    <marker id="arrow-55555c-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#55555c"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1005" height="342" fill="#fcfcfc"/>
+  <path d="M48 40 H255 a8 8 0 0 1 8 8 V108 a8 8 0 0 1 -8 8 H48 a8 8 0 0 1 -8 -8 V48 a8 8 0 0 1 8 -8 Z" fill="#fcfcfc" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="151.5" y="72.3" fill="#0a0a0a" text-anchor="middle">Browser</text>
+  <text x="151.5" y="96.3" fill="#55555c" text-anchor="middle">capture + playback</text>
+  </g>
+  <path d="M401.4 40 H565.4 a8 8 0 0 1 8 8 V108 a8 8 0 0 1 -8 8 H401.4 a8 8 0 0 1 -8 -8 V48 a8 8 0 0 1 8 -8 Z" fill="#fcfcfc" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="483.4" y="72.3" fill="#0a0a0a" text-anchor="middle">Media server</text>
+  <text x="483.4" y="96.3" fill="#55555c" text-anchor="middle">forwards audio</text>
+  </g>
+  <path d="M711.8 40 H950.8 a8 8 0 0 1 8 8 V108 a8 8 0 0 1 -8 8 H711.8 a8 8 0 0 1 -8 -8 V48 a8 8 0 0 1 8 -8 Z" fill="#f2f2f3" stroke="#6f3fb0"/>
+  <g font-size="18px">
+  <text x="831.3" y="72.3" fill="#0a0a0a" text-anchor="middle">Voice agent</text>
+  <text x="831.3" y="96.3" fill="#55555c" text-anchor="middle">turns + interruptions</text>
+  </g>
+  <path d="M706.3 226 H956.3 a8 8 0 0 1 8 8 V294 a8 8 0 0 1 -8 8 H706.3 a8 8 0 0 1 -8 -8 V234 a8 8 0 0 1 8 -8 Z" fill="#fcfcfc" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="831.3" y="258.3" fill="#0a0a0a" text-anchor="middle">STT · LLM · TTS</text>
+  <text x="831.3" y="282.3" fill="#55555c" text-anchor="middle">local or remote models</text>
+  </g>
+  <path d="M 263 78 L 393.4 78" fill="none" stroke="#55555c" stroke-width="1.6" marker-end="url(#arrow-55555c)" marker-start="url(#arrow-55555c-back)"/>
+  <rect x="294.2" y="67" width="68" height="22" fill="#fcfcfc"/>
+  <g font-size="16px">
+  <text x="328.2" y="83.6" fill="#55555c" text-anchor="middle">WebRTC</text>
+  </g>
+  <path d="M 573.4 78 L 703.8 78" fill="none" stroke="#55555c" stroke-width="1.6" marker-end="url(#arrow-55555c)" marker-start="url(#arrow-55555c-back)"/>
+  <rect x="604.6" y="67" width="68" height="22" fill="#fcfcfc"/>
+  <g font-size="16px">
+  <text x="638.6" y="83.6" fill="#55555c" text-anchor="middle">WebRTC</text>
+  </g>
+  <path d="M 831.3 116 L 831.3 226" fill="none" stroke="#55555c" stroke-width="1.6" marker-end="url(#arrow-55555c)" marker-start="url(#arrow-55555c-back)"/>
+  <rect x="773.3" y="160" width="116" height="22" fill="#fcfcfc"/>
+  <g font-size="16px">
+  <text x="831.3" y="176.6" fill="#55555c" text-anchor="middle">model calls</text>
+  </g>
+</svg>

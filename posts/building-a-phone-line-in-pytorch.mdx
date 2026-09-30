@@ -1,87 +1,147 @@
 ---
 title: 'Building a phone line in PyTorch'
-description: 'G.711, 8 kHz, a 300 to 3400 Hz passband, and packet loss, in about 200 lines. Three decisions that are easy to get wrong, where wrong is silent.'
+description: 'Build an offline telephone-channel model in PyTorch: band-limiting, 8 kHz resampling, mu-law quantisation, frame loss, and gradients you can verify.'
 pubDate: 2026-08-15
+updatedDate: 2026-09-30
 tags: ['telephony', 'dsp', 'pytorch', 'benchmarking']
 author: 'Mahimai Raja J'
+cover: ./images/phone-line/phone-cover.webp
+coverAlt: Hands connect an audio filter on a workbench beside a telephone receiver and an oscilloscope.
+socialImage: ./images/phone-line/phone-social.jpg
 ---
 
-import Figure from '../../components/blog/Figure.astro';
+import { Image } from 'astro:assets';
+import coverImage from './images/phone-line/phone-cover.webp';
 import SignalChain from '../../components/blog/figures/SignalChain.astro';
 import FilterRolloff from '../../components/blog/figures/FilterRolloff.astro';
-import YouTube from '../../components/blog/YouTube.astro';
+import validationScript from './images/phone-line/verify-channel.py?url&no-inline';
+import validationOutput from './images/phone-line/verified-output.json?url&no-inline';
 
-If you want to know how your text to speech survives a phone call, you have to build the phone call. G.711, 8 kHz, a 300 to 3400 Hz passband, packet loss. It is about 200 lines. Three of the decisions in it are easy to get wrong, and wrong here is silent.
+<Image
+  src={coverImage}
+  alt="Hands connect an audio filter on a workbench beside a telephone receiver and an oscilloscope."
+  widths={[480, 800, 1200, 1600]}
+  sizes="(min-width: 1280px) 784px, (min-width: 1024px) 55vw, (min-width: 832px) 792px, calc(100vw - 40px)"
+  loading="eager"
+  fetchpriority="high"
+  class="article-cover"
+/>
 
-## The order is physical, not arbitrary
+A voice that sounds clear through headphones can lose useful detail on a telephone connection. Before testing recognition, we need a repeatable way to change the audio.
 
-```
-native float32 PCM
-  1. highpass at 300 Hz      at the native rate
-  2. lowpass at 3400 Hz      at the native rate, also the anti-alias filter
-  3. resample to 8000 Hz
-  4. mu-law encode           -> integer codes 0..255
-  5. drop 20 ms frames       on the codes
-  6. mu-law decode           -> float32 at 8000 Hz
-```
+The [handset-bench channel model](https://github.com/mahimailabs/handset-bench/blob/651ce772ba08ab56dd1b057d3b2ac9304c6eeb4a/src/handset_bench/codec.py) does that in PyTorch: filter the signal, resample to 8 kHz, quantise it, and erase selected frames. You can inspect every stage and reuse the same configuration in training and evaluation.
 
-Band-limiting happens at the native rate, before downsampling. The 3400 Hz low pass already sits below the 4000 Hz Nyquist of an 8 kHz target, so it doubles as the anti-alias filter and the resampler cannot introduce artefacts a real carrier would not produce.
+It is an **offline approximation**. TorchAudio's mu-law transform isn't a byte-compatible G.711 encoder, and silence-filled frames don't reproduce a live receiver's packet-loss concealment. Those boundaries matter when interpreting the result.
 
-Steps 4 and 5 are the ones people reverse. A network loses packets, and a packet carries encoded frames. So loss has to land on the codes, after encoding. Dropping samples before encoding models something that does not happen on a real line.
+<span id="the-order-is-physical-not-arbitrary" aria-hidden="true" />
 
-<Figure label="The order is physical, not arbitrary"><SignalChain /></Figure>
+## Signal Path
 
-## One biquad is not a carrier
-
-The obvious lowpass is a single biquad. It is 12 dB per octave. Measured against a 3400 Hz cutoff, that leaves a 6000 Hz tone 10.9 dB down: a tone well outside the passband survives your "band-limited" stage almost intact, and you are measuring a filter no telco would ship.
-
-A real ITU-T G.712 channel is far steeper. Four cascaded sections give an 8th-order Butterworth at 48 dB per octave, which puts that same 6000 Hz tone 42.0 dB down.
-
-<Figure label="One biquad vs the real channel"><FilterRolloff /></Figure>
-
-<YouTube id="3wurfKru-kE" label="Watch: the tone that survives one filter and not the other" />
-
-But you cannot cascade four identical Q = 0.707 sections. Each one is 3 dB down at 3400 Hz, so four of them are 12 dB down there, and the real -3 dB corner lands near 2260 Hz. You have quietly eaten a third of the passband. Each section needs its own Q instead:
+The function accepts a waveform and its actual sample rate, then returns floating-point audio at 8 kHz:
 
 ```python
-def _butterworth_qs(sections: int) -> tuple[float, ...]:
-    order = 2 * sections
-    return tuple(
-        1.0 / (2.0 * math.cos((2 * k + 1) * math.pi / (2 * order)))
-        for k in range(sections)
-    )
+from handset_bench.codec import phone_line
+
+# wav: mono float32 PCM, scaled to [-1, 1], sampled at 24 kHz.
+narrow = phone_line(wav, src_sr=24000, loss_p=0.03, seed=7)
 ```
 
-That puts -3 dB at the nominal cutoff, 3.01 dB at 3400 Hz measured, while still rolling off at 6 * 2 * sections dB per octave.
+<SignalChain />
 
-Test the steady state, not the whole signal. An IIR has a startup transient, and if you take the max over the full buffer you measure the transient, not the filter.
+Filtering at the source rate suppresses unwanted frequencies before downsampling. The model uses 300 Hz high-pass and 3,400 Hz low-pass cascades, followed by TorchAudio's [sinc-based resampler](https://docs.pytorch.org/audio/2.8/generated/torchaudio.transforms.Resample.html).
 
-## Mu-law has no exact zero
+A cutoff below the 4 kHz output Nyquist frequency doesn't guarantee zero aliasing. The filter has a transition band, and the resampler has its own low-pass kernel. Inspect their combined response at the source rates you actually use.
 
-Silence encodes to code 128. Decoding 128 gives 8.621e-5, which is -81.3 dBFS. Inaudible, but not zero.
+Pass mono audio deliberately. This implementation flattens multidimensional tensors; passing stereo channels directly would concatenate them rather than downmix them.
 
-This matters when you fill dropped frames. Fill them with 0.0 and you have written a value the codec cannot produce. Assert on the encode side, not on a decoded 0.0 that will never appear.
+<span id="one-biquad-is-not-a-carrier" aria-hidden="true" />
 
-A trailing partial frame is left intact, because a jitter buffer cannot lose half a packet.
+## Filter Design
 
-## The differentiable version is smaller than it looks
+Four low-pass sections need four different Q values to form an eighth-order Butterworth response. Repeating one section four times makes a steeper filter, but also compounds its attenuation at the intended cutoff.
 
-If you want to train through the codec, the usual worry is the 8-bit quantiser. It turns out to be the only worry.
-
-Mu-law companding is smooth and differentiable everywhere. Band-limiting is a linear biquad. Resampling is linear. And `expand(compand(x))` is exactly `x`: the pair cancels. So the only lossy operation in the whole roundtrip is the quantiser, and a straight-through estimator on it reduces to an identity gradient across the entire chain:
+The project calculates the section values like this:
 
 ```python
-def codec_roundtrip(x: torch.Tensor) -> torch.Tensor:
-    exact = exact_roundtrip(x)
-    return x + (exact - x).detach()
+import math
+
+order = 8
+qs = tuple(
+    1 / (2 * math.cos((2 * k + 1) * math.pi / (2 * order)))
+    for k in range(order // 2)
+)
+# Approximately: 0.510, 0.601, 0.900, 2.563.
 ```
 
-The forward pass *is* the reference implementation. Not "agrees within a tolerance", bit-identical by construction, because it is the same function.
+<FilterRolloff />
 
-That matters more than it sounds. Our first version reimplemented the arithmetic and was off by one ULP, because torchaudio computes `exp(v) - 1` where the accurate spelling is `expm1(v)`. Reimplementing the reference is exactly how a codec layer drifts away from the codec it is supposed to model, and if it drifts you are training against a phone line the model will never meet at inference.
+The chart evaluates the small-signal digital low-pass coefficients at a **24 kHz source rate and 3,400 Hz cutoff**. One section gives about −13.08 dB at 6 kHz; the correctly tuned cascade gives −51.44 dB. Four identical Q = 1/√2 sections reach −12.04 dB at the intended cutoff, shifting their combined half-power cutoff to about 2,328 Hz. This coefficient response assumes no clipping; large signals can encounter TorchAudio's output clamping.
 
-## One implementation, imported everywhere
+These are responses of the specified filter, not measurements of a carrier network or a claim of G.712 compliance. The earlier version of this post quoted different attenuation values without enough fixture detail; the chart now uses the actual digital response.
 
-The training pipeline imports these functions rather than reimplementing them. If training conditions and evaluation conditions were allowed to drift apart, every quality claim built on them would be unfalsifiable.
+For a waveform test, measure a steady portion of a sine tone after the IIR startup transient. A peak over the whole buffer answers a different question. The project's [codec tests](https://github.com/mahimailabs/handset-bench/blob/651ce772ba08ab56dd1b057d3b2ac9304c6eeb4a/tests/test_codec.py) demonstrate that separation.
 
-That is the constraint worth keeping. Everything else here is details.
+<span id="mu-law-has-no-exact-zero" aria-hidden="true" />
+
+## Codec Fidelity
+
+TorchAudio applies a continuous mu-law companding function and quantises the result into 256 levels. Its [encoding API](https://docs.pytorch.org/audio/2.8/generated/torchaudio.functional.mu_law_encoding.html) specifies that operation; it doesn't promise interoperable G.711 bytes.
+
+For **this TorchAudio transform**, zero encodes to integer 128 and decoding that value yields approximately +0.00008621, or −81.29 dB relative to full scale. That small offset is a property of this quantiser. It is not evidence that telephone PCMU has no zero code.
+
+G.711 PCMU uses its own codeword mapping. [RFC 3551](https://www.rfc-editor.org/rfc/rfc3551.html#section-4.5.14) specifies its 8-bit samples and RTP byte layout. If you need wire compatibility, use a G.711 implementation and test known encode/decode vectors. Matching TorchAudio only verifies compatibility with TorchAudio.
+
+## Packet Loss
+
+At 8 kHz, 20 ms contains **160 samples**. The model groups encoded values into blocks of that size and independently selects blocks for replacement. A probability of 3% is a random loss rate, not a promise that exactly 3% of a short clip will be erased.
+
+Replacement with the model's silence code is a receiver policy layered on top of the loss decision. A network loses a packet; it doesn't deliver a packet full of silence. A live receiver might conceal the gap by repeating or synthesising audio. [WebRTC's receive path](/blog/how-your-voice-travels-through-webrtc#jitter-buffering) also includes arrival deadlines that this offline transform doesn't model.
+
+The implementation preserves any trailing block shorter than 160 samples. That is a test-harness convention, not a rule about what a jitter buffer can lose. Keep the seed, realised mask, and tail policy with the result.
+
+<span id="the-differentiable-version-is-smaller-than-it-looks" aria-hidden="true" />
+
+## Surrogate Gradients
+
+Quantisation blocks the useful derivative needed for training. A straight-through estimator chooses a substitute gradient while retaining the quantised audio in the forward pass. The substitute is a training decision, not the true derivative of the codec.
+
+For the **samplewise encode/decode stage**, a small custom autograd function makes that choice explicit:
+
+```python
+import torch
+from handset_bench import codec
+
+class CodecSTE(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return codec.mu_law_decode(codec.mu_law_encode(x))
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output
+
+quantised = CodecSTE.apply(narrowband_pcm)
+```
+
+The forward pass calls the shared reference implementation directly. The backward pass deliberately treats this stage as an identity. This follows PyTorch's [custom autograd interface](https://docs.pytorch.org/docs/2.8/notes/extending.html#extending-torch-autograd).
+
+It doesn't make the whole phone line an identity. Filters and resampling transform gradients; resampling also changes the number of samples. A loss mask needs its own gradient policy. Keep those operations outside this samplewise wrapper and verify both forward outputs and backward behaviour.
+
+<span id="one-implementation-imported-everywhere" aria-hidden="true" />
+
+## Verification Tests
+
+A shared function prevents training and evaluation from silently using different arithmetic. It doesn't prove that the shared function models the deployment channel correctly. Test those two claims separately.
+
+| Boundary     | Check                                                                |
+| ------------ | -------------------------------------------------------------------- |
+| Input        | Mono layout, declared sample rate, amplitude range.                  |
+| Filters      | In-band gain, cutoff response, stop-band attenuation after settling. |
+| Resampling   | Expected output length and alias rejection at each source rate.      |
+| Quantisation | Reference outputs and silence mapping; G.711 vectors if required.    |
+| Loss         | Whole-frame masks, repeatability, realised rate, tail handling.      |
+| Training     | Forward equality with the chosen reference and intended gradients.   |
+
+The <a href={validationScript} download="verify-channel.py">validation script</a> and <a href={validationOutput}>recorded output</a> reproduce the filter, zero-code, and gradient checks with Python 3.12 and Torch/TorchAudio 2.8 on CPU. The custom wrapper matched the reference on 2,000,001 float32 inputs and returned the intended unit gradients. That checks this fixture, not every possible input or device.
+
+Only then score the output. [A small smoke run](/blog/your-smoke-run-is-lying-to-you) can confirm coverage and execution; it can't establish a model ranking. And [the text normaliser](/blog/the-normaliser-that-scored-itself) needs its own fixtures, because an audio test can pass while the scorer still destroys a phone number.

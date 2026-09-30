@@ -1,0 +1,22 @@
+// Recognition is rerun when its inputs change. Scoring can reuse retained text.
+// Icons indicate artifacts and processes, not a particular storage deployment.
+diagram theme: light background: #fcfcfc text: (color: #0a0a0a)
+default node text: (size: 18) fill: #fcfcfc border: #95959d
+default edge line: #55555c line: (path: curved)
+style dim text: (color: #55555c)
+style retained fill: #f2f2f3 border: #6f3fb0
+
+node archive "Retain the evidence" style: retained contents: (align: center)
+node archive.raw "Raw transcript" shape: document
+node archive.meta "Model + audio IDs / run configuration" (size: 18, wrap: 22, color: #55555c) shape: none below archive.raw (gap: tight)
+node asr "ASR / [dim]recognition[/dim]" icon: cube left of archive
+node audio "Audio / [dim]input[/dim]" icon: package left of asr
+node scorer "Versioned scorer" icon: cube below archive
+node reference "Reference / transcript" shape: document left of scorer
+node metric "Error counts / + WER" shape: document right of scorer
+edge audio -> asr from: right to: left
+edge asr -> archive from: right to: left
+edge archive -> scorer "rescore" (size: 18, color: #6f3fb0) from: bottom to: top line: #6f3fb0
+edge reference -> scorer from: right to: left
+edge scorer -> metric from: right to: left line: #6f3fb0
+node note "Change the scorer; reuse the recognition output." (size: 18, wrap: 48, color: #55555c) shape: none below reference and scorer and metric (gap: tight)

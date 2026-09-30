@@ -1,0 +1,14 @@
+diagram theme: light background: #fcfcfc text: (color: #0a0a0a)
+default node text: (size: 18) fill: #fcfcfc border: #95959d
+default edge line: #55555c line: (path: square, corners: rounded)
+style dim text: (color: #55555c)
+style agent fill: #f2f2f3 border: #6f3fb0
+
+node browser "Browser / [dim]capture + playback[/dim]"
+node media "Media server / [dim]forwards audio[/dim]" right of browser (gap: wide)
+node agent "Voice agent / [dim]turns + interruptions[/dim]" right of media (gap: wide) style: agent
+node models "STT · LLM · TTS / [dim]local or remote models[/dim]" below agent (gap: wide)
+
+edge browser <-> media "WebRTC" (size: 16) from: right to: left
+edge media <-> agent "WebRTC" (size: 16) from: right to: left
+edge agent <-> models "model calls" (size: 16) from: bottom to: top

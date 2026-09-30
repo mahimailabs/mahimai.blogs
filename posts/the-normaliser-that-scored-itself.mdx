@@ -1,98 +1,117 @@
 ---
 title: 'The normaliser that scored itself'
-description: 'The standard Whisper text normaliser silently deletes area codes and leading zeros, scoring a perfect phone number as 300 percent WER. The three bugs, and the fix.'
+description: 'A correct phone number can score 300% WER when normalisation changes its tokens. Reproduce the failure, preserve leading zeros, and test the scoring policy.'
 pubDate: 2026-08-13
+updatedDate: 2026-09-30
 tags: ['telephony', 'evaluation', 'asr', 'benchmarking']
 author: 'Mahimai Raja J'
+cover: ./images/normaliser/normaliser-cover.webp
+coverAlt: An audio researcher compares transcript strips marked 0 0 7 and 7 beside a telephone and laptop.
+socialImage: ./images/normaliser/normaliser-social.jpg
 ---
 
-import Figure from '../../components/blog/Figure.astro';
+import { Image } from 'astro:assets';
+import coverImage from './images/normaliser/normaliser-cover.webp';
 import NormaliserFailure from '../../components/blog/figures/NormaliserFailure.astro';
 import NormaliserConvergence from '../../components/blog/figures/NormaliserConvergence.astro';
-import YouTube from '../../components/blog/YouTube.astro';
+import validationScript from './images/normaliser/verify-normaliser.py?url&no-inline';
+import validationOutput from './images/normaliser/verified-output.json?url&no-inline';
 
-We were building a benchmark for telephony text to speech. Synthesise a line, push it through a real G.711 phone line, transcribe it, score the word error rate. Standard setup. Everyone scores WER after normalising both sides, and everyone uses Whisper's English normaliser, because the papers do.
+<Image
+  src={coverImage}
+  alt="An audio researcher compares transcript strips marked 0 0 7 and 7 beside a telephone and laptop."
+  widths={[480, 800, 1200, 1600]}
+  sizes="(min-width: 1280px) 784px, (min-width: 1024px) 55vw, (min-width: 832px) 792px, calc(100vw - 40px)"
+  loading="eager"
+  fetchpriority="high"
+  class="article-cover"
+/>
 
-Then every utterance containing a phone number came back as a near-total failure, on audio that sounded perfect.
+“Six one three five five five zero one nine eight” and `613 555 0198` describe the same phone number. Put those strings through the English normaliser used in our benchmark, then calculate word error rate: **300%**.
 
-<YouTube id="U922BC_prao" label="Watch: a correct number scored as 300 percent, and the fix" />
+No audio is needed to reproduce this failure. The scoring pipeline changes the representation before it measures the difference.
 
-## The first layer
+That matters in a [telephone-channel benchmark](/blog/building-a-phone-line-in-pytorch): a text-processing mismatch can look like damage to the voice. The fix starts with a scoring contract. Decide which differences are formatting, which change the identifier, and which must survive normalisation.
 
-The reference is spoken digits: "six one three five five five zero one nine eight". The ASR heard it correctly and wrote "613 555 0198".
+<span id="the-first-layer" aria-hidden="true" />
 
-Run both through the normaliser:
+## Token Alignment
 
-```
-reference   "six one three five five five zero one nine eight"  ->  "6135550198"
-transcript  "613 555 0198"                                      ->  "613 555 198"
-```
+WER counts substitutions, deletions, and insertions, then divides by the number of reference tokens. The English normaliser can turn a sequence of spoken digits into one token while leaving a grouped numeric transcript as several tokens.
 
-The reference collapses to a single token. The transcript stays as three. One reference word, three errors. WER is 300 percent.
+<NormaliserFailure />
 
-Digits were 20 percent of our test set, and they are the hardest case on a narrow band. The headline number would have been measuring the normaliser, not the telephone line.
+For this pair, the alignment has one substitution and two insertions against one reference token: **(1 + 0 + 2) / 1 = 3**, or 300%. WER can exceed 100% because insertions add errors without increasing the reference denominator. [JiWER's alignment tools](https://jitsi.github.io/jiwer/usage/#alignment) expose the counts behind that percentage.
 
-## The obvious fix, and why it is not enough
+The reproduced fixture uses the Whisper-derived `whisper-normalizer 0.1.15` package and `jiwer 4.0.0`. It verifies a text-scoring failure, not the quality of a particular recording or every Whisper release. You can run the <a href={validationScript} download="verify-normaliser.py">complete fixture</a> and inspect its <a href={validationOutput}>recorded output</a>.
 
-Split every run of digits into single digits, on both sides. Now "6135550198" and "613 555 0198" and "six one three..." all reduce to the same token sequence, and a wrong digit costs exactly one word, which is the granularity a phone agent cares about.
+<span id="the-second-layer-leading-zeros" aria-hidden="true" />
 
-Keep ordinals whole, or "first" becomes "1 st" and a single misheard word costs two errors.
+## Leading Zeros
 
-We shipped that, wrote a test, and moved on. It was still wrong.
+A phone number is an identifier. Treating each group as an integer deletes information: `0198` becomes `198`, and `007` becomes `7`.
 
-## The second layer: leading zeros
+| Input  | Stock normaliser output |
+| ------ | ----------------------- |
+| `0198` | `198`                   |
+| `007`  | `7`                     |
+| `0500` | `500`                   |
 
-Look at that transcript again.
+Splitting digits **after** this transformation is too late. You can split `198` into `1 9 8`, but you can't infer that a zero used to lead it.
 
-```
-"613 555 0198"  ->  "613 555 198"
-```
+The benchmark's wrapper separates numeric digits before normalisation, then separates and maps them again afterwards. Both passes matter because written digits and spoken number words enter through different paths.
 
-The zero is gone. The normaliser reads each digit group as a number, and numbers do not have leading zeros. Atomising afterwards cannot recover a digit that was already deleted.
+<span id="the-third-layer-brackets" aria-hidden="true" />
 
-```
-"0198"  ->  "198"
-"007"   ->  "7"
-"0500"  ->  "500"
-```
+## Bracket Removal
 
-Every leading zero in a phone number, a PIN, an extension, or a time silently disappears from the hypothesis. The spelled-out reference keeps its zero, because there it is the word "zero". So a correct transcription loses a word it actually got right.
+The stock normaliser treats parenthesised text as an annotation. In the phone-number fixture, `(613) 555-0198` becomes `555 198`: the area code disappears along with the leading zero.
 
-29 percent of our references contain a zero. One of them is an account number starting "0 0 7", where two digits vanish.
+The [Whisper normaliser source](https://github.com/openai/whisper/blob/v20250625/whisper/normalizers/english.py) shows the parenthesis-removal rule. That is a reasonable convention for annotations such as `(inaudible)`, but it conflicts with telephone-number formatting.
 
-## The third layer: brackets
+For the benchmark's chosen policy, the wrapper removes bracket characters while preserving their contents. This protects the area code. It also changes how annotations elsewhere are handled, so it shouldn't be applied blindly to every transcript format.
 
-```
-"(613) 555-0198"  ->  "555 198"
-```
+<span id="the-obvious-fix-and-why-it-is-not-enough" aria-hidden="true" />
+<span id="the-actual-fix" aria-hidden="true" />
 
-The whole area code is gone. The normaliser treats a bracketed span as an annotation and deletes it. That is correct behaviour for transcription conventions like "(inaudible)". It is catastrophic for a North American phone number.
+## Scoring Policy
 
-<Figure label="One correct number, three silent losses"><NormaliserFailure /></Figure>
+For the tested English phone-number forms, we want the same ten digit tokens. A formatting change should score zero; a changed digit should remain an error.
 
-## The actual fix
+<NormaliserConvergence />
 
-Atomise the digits *before* the normaliser runs, not just after, and strip brackets first so nothing gets deleted as an annotation:
+The [versioned implementation](https://github.com/mahimailabs/handset-bench/blob/651ce772ba08ab56dd1b057d3b2ac9304c6eeb4a/src/handset_bench/metrics/wer.py) first matches a complete lowercase numeric ordinal, otherwise a single digit:
 
 ```python
-def normalize(text: str) -> str:
-    presplit = _BRACKET.sub(" ", text)
-    presplit = _DIGIT_RUN.sub(lambda m: f" {m.group()} ", presplit)
-    normalised = _normalizer()(presplit)
-    stripped = _NON_WORD.sub(" ", normalised)
-    atomised = _DIGIT_RUN.sub(lambda m: f" {m.group()} ", stripped)
-    tokens = [_DIGIT_WORDS.get(tok, tok) for tok in atomised.split()]
-    return _MERIDIEM.sub(lambda m: m.group().replace(" ", ""), " ".join(tokens))
+import re
+
+DIGITS = re.compile(r"\d+(?:st|nd|rd|th)\b|\d")
+assert DIGITS.findall("007 on the 1st") == ["0", "0", "7", "1st"]
 ```
 
-Pre-splitting means the normaliser only ever sees single digits, which it leaves alone. The mapping afterwards exists because the normaliser is context-dependent in the other direction too: "one thousand two hundred forty seven" becomes "1247", but a standalone "1" stays the word "one".
+That pattern explains why `007` can be separated without turning `1st` into `1 st`. The complete wrapper also handles bracket delimiters, punctuation, digit words, and meridiem spacing. Its behaviour belongs to this benchmark's policy; it is not a universal definition of correct speech.
 
-<Figure label="After the fix, every spelling converges"><NormaliserConvergence /></Figure>
+In particular, the wrapper is too permissive for some transactional fields. In the reproduced fixture, `€12` and `12` both become `1 2`. Removing punctuation can erase currency or decimal distinctions. Amounts need their currency and decimal value; times need their clock convention; mixed letter-and-digit codes need an explicit character policy. Use separate field checks when those distinctions determine whether an action is correct.
 
-## The part that should worry you
+Digit-token WER is useful for locating mistakes. Also report **whole-identifier exact match after the agreed field normalisation**: one substitution in a ten-digit phone number is 10% digit-token WER, but the phone number is still wrong. Neither metric should hide the other.
 
-None of these three bugs announce themselves. There is no exception, no warning. You get a number, the number looks plausible, and it is measuring your text pipeline instead of your audio.
+<span id="the-part-that-should-worry-you" aria-hidden="true" />
 
-If you are scoring ASR on anything transactional (phone numbers, order IDs, amounts, addresses, times) with the stock normaliser, you have some version of this, and your digit scores are wrong. Test it directly: take a correct transcription of your own reference, in the form your ASR actually emits, and confirm it scores zero.
+## Regression Tests
 
-Ours did not.
+A normaliser needs tests for both equivalence and difference. A function that deletes every digit would make the formatting examples agree while destroying the task.
+
+| Test                                  | Required result                                            |
+| ------------------------------------- | ---------------------------------------------------------- |
+| Spoken digits vs grouped phone number | Same digit sequence.                                       |
+| Bracketed vs unbracketed area code    | Same phone identifier.                                     |
+| `007` vs `7`                          | Different identifiers.                                     |
+| One wrong digit                       | A nonzero edit count and failed exact match.               |
+| `first` vs `1st`                      | Equivalent under the chosen ordinal policy.                |
+| Currency, decimals, annotations       | Explicit field-specific fixtures, not assumed equivalence. |
+
+The [project's regression tests](https://github.com/mahimailabs/handset-bench/blob/651ce772ba08ab56dd1b057d3b2ac9304c6eeb4a/tests/test_wer.py) cover the number-format cases. The downloadable fixture also records counterexamples outside that scope, so passing the phone-number examples doesn't look like a general guarantee.
+
+Pin the normaliser version and keep the raw reference and hypothesis alongside the normalised tokens. Changing the policy changes both the alignment and, potentially, the denominator. Recompute both sides of a comparison under the same policy before comparing scores.
+
+[A smoke run](/blog/your-smoke-run-is-lying-to-you#run-provenance) should check these fixtures before expensive recognition runs. The [audio receive path](/blog/how-your-voice-travels-through-webrtc#pipeline-diagnostics) needs its own evidence. Keeping the text boundary inspectable lets you tell a lost digit in the sound from a lost digit in the scorer.

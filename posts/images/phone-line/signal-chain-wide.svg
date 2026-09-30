@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="767" height="548" viewBox="0 0 767 548" font-family="'DejaVu Sans Mono', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace" font-size="14px">
+  <defs>
+    <marker id="arrow-6f3fb0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6f3fb0"/>
+    </marker>
+    <marker id="arrow-6f3fb0-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6f3fb0"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="767" height="548" fill="#fcfcfc"/>
+  <path d="M223 40 H408 a8 8 0 0 1 8 8 V362 a8 8 0 0 1 -8 8 H223 a8 8 0 0 1 -8 -8 V48 a8 8 0 0 1 8 -8 Z" fill="#f2f2f3" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="229" y="72.3" fill="#0a0a0a" text-anchor="start">Preprocessing</text>
+  </g>
+  <g transform="translate(291.5 88) scale(2)">
+    <path d="M12 2.6 L20.4 6.800000000000001 L12 11 L3.5999999999999996 6.800000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3.5999999999999996 6.800000000000001 L12 11 L12 19.400000000000002 L3.5999999999999996 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M20.4 6.800000000000001 L12 11 L12 19.400000000000002 L20.4 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <g font-size="18px">
+  <text x="315.5" y="164.3" fill="#0a0a0a" text-anchor="middle">300 Hz high-pass</text>
+  <text x="315.5" y="188.3" fill="#0a0a0a" text-anchor="middle">3.4 kHz low-pass</text>
+  </g>
+  <g transform="translate(291.5 250) scale(2)">
+    <path d="M12 2.6 L20.4 6.800000000000001 L12 11 L3.5999999999999996 6.800000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3.5999999999999996 6.800000000000001 L12 11 L12 19.400000000000002 L3.5999999999999996 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M20.4 6.800000000000001 L12 11 L12 19.400000000000002 L20.4 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <g font-size="18px">
+  <text x="315.5" y="326.3" fill="#0a0a0a" text-anchor="middle">Sinc resampler</text>
+  <text x="315.5" y="350.3" fill="#55555c" text-anchor="middle">8 kHz PCM</text>
+  </g>
+  <path d="M480 40 H719 a8 8 0 0 1 8 8 V500 a8 8 0 0 1 -8 8 H480 a8 8 0 0 1 -8 -8 V48 a8 8 0 0 1 8 -8 Z" fill="#f2f2f3" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="486" y="72.3" fill="#0a0a0a" text-anchor="start">Channel approximation</text>
+  </g>
+  <g transform="translate(575.5 88) scale(2)">
+    <path d="M12 2.6 L20.4 6.800000000000001 L12 11 L3.5999999999999996 6.800000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3.5999999999999996 6.800000000000001 L12 11 L12 19.400000000000002 L3.5999999999999996 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M20.4 6.800000000000001 L12 11 L12 19.400000000000002 L20.4 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <g font-size="18px">
+  <text x="599.5" y="164.3" fill="#0a0a0a" text-anchor="middle">μ-law quantizer</text>
+  <text x="599.5" y="188.3" fill="#55555c" text-anchor="middle">256 levels</text>
+  </g>
+  <g transform="translate(575.5 250) scale(2)">
+    <path d="M12 2.6 L22 7.4 L12 12.2 L2 7.4 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M2 7.4 L12 12.2 L12 21 L2 16.2 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M22 7.4 L12 12.2 L12 21 L22 16.2 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <g font-size="18px">
+  <text x="599.5" y="326.3" fill="#0a0a0a" text-anchor="middle">20 ms frame erasure</text>
+  <text x="599.5" y="350.3" fill="#55555c" text-anchor="middle">160 encoded samples</text>
+  </g>
+  <g transform="translate(575.5 412) scale(2)">
+    <path d="M12 2.6 L20.4 6.800000000000001 L12 11 L3.5999999999999996 6.800000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3.5999999999999996 6.800000000000001 L12 11 L12 19.400000000000002 L3.5999999999999996 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M20.4 6.800000000000001 L12 11 L12 19.400000000000002 L20.4 15.200000000000001 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <g font-size="18px">
+  <text x="599.5" y="488.3" fill="#0a0a0a" text-anchor="middle">μ-law expansion</text>
+  </g>
+  <g transform="translate(75.5 88) scale(2)">
+    <path d="M12 2.6 L22 7.4 L12 12.2 L2 7.4 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M2 7.4 L12 12.2 L12 21 L2 16.2 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M22 7.4 L12 12.2 L12 21 L22 16.2 Z" fill="#d6d9e6" stroke="#57606a" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <g font-size="18px">
+  <text x="99.5" y="164.3" fill="#0a0a0a" text-anchor="middle">Float PCM</text>
+  <text x="99.5" y="188.3" fill="#55555c" text-anchor="middle">native rate</text>
+  </g>
+  <path d="M260.5 426 H362.5 L378.5 442 V494 a8 8 0 0 1 -8 8 H260.5 a8 8 0 0 1 -8 -8 V434 a8 8 0 0 1 8 -8 Z" fill="#fcfcfc" stroke="#95959d"/>
+  <path d="M362.5 426 V442 H378.5" fill="none" stroke="#95959d"/>
+  <g font-size="18px">
+  <text x="315.5" y="458.3" fill="#0a0a0a" text-anchor="middle">Float PCM</text>
+  <text x="315.5" y="482.3" fill="#0a0a0a" text-anchor="middle">8 kHz</text>
+  </g>
+  <path d="M 159 141 C 187 141, 201 141, 229 141" fill="none" stroke="#6f3fb0" stroke-width="1.6" marker-end="url(#arrow-6f3fb0)"/>
+  <path d="M 315.5 194 C 315.5 218, 315.5 226, 315.5 250" fill="none" stroke="#6f3fb0" stroke-width="1.6" marker-end="url(#arrow-6f3fb0)"/>
+  <path d="M 391.5 303 C 473.84 303, 436.16 141, 518.5 141" fill="none" stroke="#6f3fb0" stroke-width="1.6" marker-end="url(#arrow-6f3fb0)"/>
+  <path d="M 599.5 194 C 599.5 218, 599.5 226, 599.5 250" fill="none" stroke="#6f3fb0" stroke-width="1.6" marker-end="url(#arrow-6f3fb0)"/>
+  <path d="M 599.5 356 C 599.5 380, 599.5 388, 599.5 412" fill="none" stroke="#6f3fb0" stroke-width="1.6" marker-end="url(#arrow-6f3fb0)"/>
+  <path d="M 518.5 453 C 462.33 453, 434.67 464, 378.5 464" fill="none" stroke="#6f3fb0" stroke-width="1.6" marker-end="url(#arrow-6f3fb0)"/>
+</svg>

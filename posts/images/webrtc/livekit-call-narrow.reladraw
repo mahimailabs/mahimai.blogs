@@ -1,0 +1,29 @@
+// References: https://docs.livekit.io/telephony/
+// https://docs.livekit.io/reference/internals/livekit-sfu/
+// Service containment and a browser alternative, arranged for a narrow viewport.
+diagram theme: light background: #fcfcfc text: (color: #0a0a0a)
+default node text: (size: 18) fill: #fcfcfc border: #95959d
+default edge line: #6f3fb0 line: (path: curved)
+style dim text: (color: #55555c)
+style cloud fill: #f2f2f3 border: #6f3fb0
+
+node livekit "LiveKit" style: cloud
+node livekit.mark icon: cubes inside livekit top-right
+node livekit.sip "SIP bridge" icon: cube
+node livekit.sfu "SFU / [dim]room media[/dim]" icon: cubes below livekit.sip
+node livekit.turn "TURN / relay / [dim]if needed[/dim]" (size: 16) icon: cube right of livekit.sip (gap: tight) level with livekit.sip
+
+node carrier "Carrier / [dim]SIP trunk[/dim]" icon: cube above livekit left level with livekit.sip
+node phone "Customer / phone" shape: none above carrier (gap: tight)
+node worker "AI worker / [dim]turns +[/dim] / [dim]STT/LLM/TTS[/dim]" icon: cubes below livekit left level with livekit.sfu
+node browser "Browser / customer" (size: 16) icon: laptop right of worker (gap: 12)
+
+edge phone <-> carrier from: bottom to: top
+edge carrier <-> livekit "RTP/SRTP" (size: 16) from: bottom to: top
+edge livekit.sip <-> livekit.sfu "WebRTC" (size: 16) from: bottom to: top
+edge livekit.sfu <-> worker "WebRTC" (size: 16) from: bottom to: top
+edge browser <-> livekit.sfu from: top to: right
+edge browser <-> livekit.turn from: top to: bottom line: #55555c
+edge livekit.turn <-> livekit.sfu from: left to: right line: #55555c
+
+node note "Audio paths. Browser uses / WebRTC directly or via TURN. / Joins + dispatch: signaling." (size: 16, wrap: 28, color: #55555c) shape: none below worker and browser (gap: tight)

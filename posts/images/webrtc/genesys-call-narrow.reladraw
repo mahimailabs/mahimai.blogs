@@ -1,0 +1,21 @@
+// Compact BYOC Cloud view. Icons denote logical roles, not host counts.
+diagram theme: light background: #fcfcfc text: (color: #0a0a0a)
+default node text: (size: 18) fill: #fcfcfc border: #95959d
+default edge line: #6f3fb0 line: (path: curved)
+style dim text: (color: #55555c)
+
+node customer "Customer / phone" shape: none
+node carrier "PSTN carrier / [dim]SIP edge[/dim]" icon: cube below customer (gap: tight)
+node cloud "Genesys Cloud" below carrier fill: #f2f2f3 border: #95959d
+node cloud.mark icon: cubes inside cloud top-right
+node cloud.media "Media Tier / [dim]SIP ↔ WebRTC[/dim]" icon: cubes
+node agent "Human agent / [dim]Genesys browser[/dim]" icon: desktop below cloud (gap: wide)
+node turn "TURN / [dim]if required[/dim]" (size: 16) icon: cube right of agent (gap: tight)
+
+edge customer <-> carrier from: bottom to: top
+edge carrier <-> cloud "RTP/SRTP" (size: 16) from: bottom to: top
+edge cloud.media <-> agent "SRTP" (size: 16) from: bottom to: top
+edge cloud.media <-> turn from: right to: top line: #55555c
+edge turn <-> agent from: left to: right line: #55555c
+
+node note "Setup: SIP + HTTPS signaling. / ICE chooses a path; STUN discovers / addresses. TURN can relay media." (size: 16, wrap: 35, color: #55555c) shape: none below customer and cloud and agent and turn

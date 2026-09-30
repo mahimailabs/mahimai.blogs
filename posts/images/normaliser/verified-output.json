@@ -1,0 +1,314 @@
+{
+  "dependencies": {
+    "whisper-normalizer": "0.1.15",
+    "jiwer": "4.0.0"
+  },
+  "policy_commit": "651ce772ba08ab56dd1b057d3b2ac9304c6eeb4a",
+  "scope": "Text fixtures only. Benchmark policy, not a general-purpose entity parser.",
+  "original_failure": {
+    "reference": "6135550198",
+    "hypothesis": "613 555 198",
+    "reference_tokens": 1,
+    "substitutions": 1,
+    "deletions": 0,
+    "insertions": 2,
+    "wer_percent": 300.0,
+    "exact_match": false
+  },
+  "phone_variants": [
+    {
+      "input": "six one three five five five zero one nine eight",
+      "stock": "6135550198",
+      "policy": {
+        "reference": "6 1 3 5 5 5 0 1 9 8",
+        "hypothesis": "6 1 3 5 5 5 0 1 9 8",
+        "reference_tokens": 10,
+        "substitutions": 0,
+        "deletions": 0,
+        "insertions": 0,
+        "wer_percent": 0.0,
+        "exact_match": true
+      }
+    },
+    {
+      "input": "613 555 0198",
+      "stock": "613 555 198",
+      "policy": {
+        "reference": "6 1 3 5 5 5 0 1 9 8",
+        "hypothesis": "6 1 3 5 5 5 0 1 9 8",
+        "reference_tokens": 10,
+        "substitutions": 0,
+        "deletions": 0,
+        "insertions": 0,
+        "wer_percent": 0.0,
+        "exact_match": true
+      }
+    },
+    {
+      "input": "(613) 555-0198",
+      "stock": "555 198",
+      "policy": {
+        "reference": "6 1 3 5 5 5 0 1 9 8",
+        "hypothesis": "6 1 3 5 5 5 0 1 9 8",
+        "reference_tokens": 10,
+        "substitutions": 0,
+        "deletions": 0,
+        "insertions": 0,
+        "wer_percent": 0.0,
+        "exact_match": true
+      }
+    },
+    {
+      "input": "6135550198",
+      "stock": "6135550198",
+      "policy": {
+        "reference": "6 1 3 5 5 5 0 1 9 8",
+        "hypothesis": "6 1 3 5 5 5 0 1 9 8",
+        "reference_tokens": 10,
+        "substitutions": 0,
+        "deletions": 0,
+        "insertions": 0,
+        "wer_percent": 0.0,
+        "exact_match": true
+      }
+    }
+  ],
+  "wrong_digit": {
+    "reference": "6 1 3 5 5 5 0 1 9 8",
+    "hypothesis": "6 1 3 5 5 5 0 1 9 9",
+    "reference_tokens": 10,
+    "substitutions": 1,
+    "deletions": 0,
+    "insertions": 0,
+    "wer_percent": 10.0,
+    "exact_match": false
+  },
+  "leading_zero_control": {
+    "reference": "0 0 7",
+    "hypothesis": "7",
+    "reference_tokens": 3,
+    "substitutions": 0,
+    "deletions": 2,
+    "insertions": 0,
+    "wer_percent": 66.66666666666666,
+    "exact_match": false
+  },
+  "ordinal_equivalence": {
+    "reference": "1st",
+    "hypothesis": "1st",
+    "reference_tokens": 1,
+    "substitutions": 0,
+    "deletions": 0,
+    "insertions": 0,
+    "wer_percent": 0.0,
+    "exact_match": true
+  },
+  "numeric_examples": [
+    {
+      "input": "0198",
+      "stock": "198",
+      "policy": "0 1 9 8"
+    },
+    {
+      "input": "007",
+      "stock": "7",
+      "policy": "0 0 7"
+    },
+    {
+      "input": "0500",
+      "stock": "500",
+      "policy": "0 5 0 0"
+    },
+    {
+      "input": "1",
+      "stock": "one",
+      "policy": "1"
+    },
+    {
+      "input": "31st",
+      "stock": "31st",
+      "policy": "31st"
+    },
+    {
+      "input": "31ST",
+      "stock": "31st",
+      "policy": "3 1 saint"
+    },
+    {
+      "input": "2:15 pm",
+      "stock": "2 15 pm",
+      "policy": "2 1 5 pm"
+    },
+    {
+      "input": "two fifteen p m",
+      "stock": "215 p m",
+      "policy": "2 1 5 pm"
+    },
+    {
+      "input": "$1,247.50",
+      "stock": "$1247.50",
+      "policy": "1 2 4 7 5 0"
+    },
+    {
+      "input": "one thousand two hundred forty seven dollars and fifty cents",
+      "stock": "$1247.50",
+      "policy": "1 2 4 7 5 0"
+    },
+    {
+      "input": "47B29K",
+      "stock": "47 b 29 k",
+      "policy": "4 7 b 2 9 k"
+    },
+    {
+      "input": "AB007",
+      "stock": "ab 7",
+      "policy": "ab 0 0 7"
+    },
+    {
+      "input": "A B zero zero seven",
+      "stock": "a b 007",
+      "policy": "a b 0 0 7"
+    },
+    {
+      "input": "(inaudible)",
+      "stock": "",
+      "policy": "inaudible"
+    }
+  ],
+  "boundary_pairs": [
+    {
+      "case": "Currency is meaningful",
+      "left": "$5",
+      "right": "5",
+      "intended_equivalence": false,
+      "policy_agrees": false,
+      "reference": "5",
+      "hypothesis": "5",
+      "reference_tokens": 1,
+      "substitutions": 0,
+      "deletions": 0,
+      "insertions": 0,
+      "wer_percent": 0.0,
+      "exact_match": true
+    },
+    {
+      "case": "Currency identity is meaningful",
+      "left": "$12",
+      "right": "€12",
+      "intended_equivalence": false,
+      "policy_agrees": false,
+      "reference": "1 2",
+      "hypothesis": "1 2",
+      "reference_tokens": 2,
+      "substitutions": 0,
+      "deletions": 0,
+      "insertions": 0,
+      "wer_percent": 0.0,
+      "exact_match": true
+    },
+    {
+      "case": "Euro unit is meaningful",
+      "left": "€12",
+      "right": "12",
+      "intended_equivalence": false,
+      "policy_agrees": false,
+      "reference": "1 2",
+      "hypothesis": "1 2",
+      "reference_tokens": 2,
+      "substitutions": 0,
+      "deletions": 0,
+      "insertions": 0,
+      "wer_percent": 0.0,
+      "exact_match": true
+    },
+    {
+      "case": "Sign is meaningful",
+      "left": "-12",
+      "right": "12",
+      "intended_equivalence": false,
+      "policy_agrees": false,
+      "reference": "1 2",
+      "hypothesis": "1 2",
+      "reference_tokens": 2,
+      "substitutions": 0,
+      "deletions": 0,
+      "insertions": 0,
+      "wer_percent": 0.0,
+      "exact_match": true
+    },
+    {
+      "case": "Decimal position is meaningful",
+      "left": "$1.25",
+      "right": "$12.5",
+      "intended_equivalence": false,
+      "policy_agrees": false,
+      "reference": "1 2 5",
+      "hypothesis": "1 2 5",
+      "reference_tokens": 3,
+      "substitutions": 0,
+      "deletions": 0,
+      "insertions": 0,
+      "wer_percent": 0.0,
+      "exact_match": true
+    },
+    {
+      "case": "Annotation is not spoken content",
+      "left": "(inaudible)",
+      "right": "inaudible",
+      "intended_equivalence": false,
+      "policy_agrees": false,
+      "reference": "inaudible",
+      "hypothesis": "inaudible",
+      "reference_tokens": 1,
+      "substitutions": 0,
+      "deletions": 0,
+      "insertions": 0,
+      "wer_percent": 0.0,
+      "exact_match": true
+    },
+    {
+      "case": "Alphanumeric letter grouping",
+      "left": "AB007",
+      "right": "A B zero zero seven",
+      "intended_equivalence": true,
+      "policy_agrees": false,
+      "reference": "ab 0 0 7",
+      "hypothesis": "a b 0 0 7",
+      "reference_tokens": 4,
+      "substitutions": 1,
+      "deletions": 0,
+      "insertions": 1,
+      "wer_percent": 50.0,
+      "exact_match": false
+    },
+    {
+      "case": "Case-insensitive ordinal",
+      "left": "31ST",
+      "right": "31st",
+      "intended_equivalence": true,
+      "policy_agrees": false,
+      "reference": "3 1 saint",
+      "hypothesis": "31st",
+      "reference_tokens": 3,
+      "substitutions": 1,
+      "deletions": 2,
+      "insertions": 0,
+      "wer_percent": 100.0,
+      "exact_match": false
+    }
+  ],
+  "regex_matches": {
+    "613": [
+      "6",
+      "1",
+      "3"
+    ],
+    "31st": [
+      "31st"
+    ],
+    "31ST": [
+      "3",
+      "1"
+    ]
+  }
+}

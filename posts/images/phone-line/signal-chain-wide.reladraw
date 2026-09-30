@@ -1,0 +1,22 @@
+// Offline channel approximation, not a real carrier or bit-exact G.711 wire codec.
+diagram theme: light background: #fcfcfc text: (color: #0a0a0a)
+default node text: (size: 18) fill: #fcfcfc border: #95959d
+default edge line: #6f3fb0 line: (path: curved)
+style dim text: (color: #55555c)
+style stage fill: #f2f2f3 border: #95959d
+
+node dsp "Preprocessing" style: stage contents: (align: center)
+node dsp.filters "300 Hz high-pass / 3.4 kHz low-pass" icon: cube
+node dsp.resample "Sinc resampler / [dim]8 kHz PCM[/dim]" icon: cube below dsp.filters
+node codec "Channel approximation" style: stage contents: (align: center) right of dsp top level with dsp
+node codec.quantizer "μ-law quantizer / [dim]256 levels[/dim]" icon: cube
+node codec.erasure "20 ms frame erasure / [dim]160 encoded samples[/dim]" icon: package below codec.quantizer
+node codec.decode "μ-law expansion" icon: cube below codec.erasure
+node input "Float PCM / [dim]native rate[/dim]" icon: package left of dsp level with dsp.filters
+node output "Float PCM / 8 kHz" shape: document below dsp
+edge input -> dsp.filters from: right to: left
+edge dsp.filters -> dsp.resample from: bottom to: top
+edge dsp.resample -> codec.quantizer from: right to: left
+edge codec.quantizer -> codec.erasure from: bottom to: top
+edge codec.erasure -> codec.decode from: bottom to: top
+edge codec.decode -> output from: left to: right
