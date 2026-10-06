@@ -1,0 +1,323 @@
+{
+  "method": "One synthetic caller audio session; LiveKit 1.8.5, OpenAI GPT-Live, GPT-5.6 Luna low reasoning; 5-second simulated lookup; roomless native AgentSession through public VoiceGateway attach. Not a benchmark. Transport and hosting excluded.",
+  "code_commit": "2c83fdd",
+  "booking": {
+    "id": "SIM-001",
+    "slot": "Monday 10:00",
+    "timezone": "America/Toronto",
+    "need": "Appointment-booking voice agent for five clinics",
+    "attendees": "Visitor and the studio's technical lead",
+    "simulation": true
+  },
+  "errors": [],
+  "usage": "AgentSessionUsage(model_usage=[LLMModelUsage(type='llm_usage', provider='api.openai.com', model='gpt-live-1', session_duration=53.0), LLMModelUsage(type='llm_usage', provider='api.openai.com', model='gpt-5.6-luna', input_tokens=18265, input_cached_tokens=5697, input_cache_creation_tokens=5011, output_tokens=549, output_reasoning_tokens=257)])",
+  "estimated_provider_usd": 0.04770355666666667,
+  "records": [
+    {
+      "model": "openai/gpt-live-1",
+      "cost_usd": 0.0,
+      "ttfb_ms": null,
+      "input_units": 0.0,
+      "output_units": 0.0,
+      "measurements": {
+        "audio_seconds": 0.0
+      },
+      "pricing_complete": true
+    },
+    {
+      "model": "openai/gpt-5.6-luna",
+      "cost_usd": 0.0004624,
+      "ttfb_ms": null,
+      "input_units": 1549.0,
+      "output_units": 68.0,
+      "measurements": {
+        "text_input": 1549,
+        "text_output": 68,
+        "cache_read": 0,
+        "cache_write": 1420
+      },
+      "pricing_complete": true
+    },
+    {
+      "model": "openai/gpt-5.6-luna",
+      "cost_usd": 0.0004089,
+      "ttfb_ms": null,
+      "input_units": 1654.0,
+      "output_units": 19.0,
+      "measurements": {
+        "text_input": 1654,
+        "text_output": 19,
+        "cache_read": 0,
+        "cache_write": 1106
+      },
+      "pricing_complete": true
+    },
+    {
+      "model": "openai/gpt-live-1",
+      "cost_usd": 0.0125,
+      "ttfb_ms": null,
+      "input_units": 0.0,
+      "output_units": 0.0,
+      "measurements": {
+        "audio_seconds": 15.0
+      },
+      "pricing_complete": true
+    },
+    {
+      "model": "openai/gpt-5.6-luna",
+      "cost_usd": 0.0005272,
+      "ttfb_ms": null,
+      "input_units": 1706.0,
+      "output_units": 155.0,
+      "measurements": {
+        "text_input": 1706,
+        "text_output": 155,
+        "cache_read": 0,
+        "cache_write": 0
+      },
+      "pricing_complete": true
+    },
+    {
+      "model": "openai/gpt-5.6-luna",
+      "cost_usd": 0.00057935,
+      "ttfb_ms": null,
+      "input_units": 1898.0,
+      "output_units": 122.0,
+      "measurements": {
+        "text_input": 1898,
+        "text_output": 122,
+        "cache_read": 0,
+        "cache_write": 1067
+      },
+      "pricing_complete": true
+    },
+    {
+      "model": "openai/gpt-5.6-luna",
+      "cost_usd": 0.000543,
+      "ttfb_ms": null,
+      "input_units": 2103.0,
+      "output_units": 57.0,
+      "measurements": {
+        "text_input": 2103,
+        "text_output": 57,
+        "cache_read": 0,
+        "cache_write": 1080
+      },
+      "pricing_complete": true
+    },
+    {
+      "model": "openai/gpt-5.6-luna",
+      "cost_usd": 0.0004622,
+      "ttfb_ms": null,
+      "input_units": 2197.0,
+      "output_units": 19.0,
+      "measurements": {
+        "text_input": 2197,
+        "text_output": 19,
+        "cache_read": 0,
+        "cache_write": 0
+      },
+      "pricing_complete": true
+    },
+    {
+      "model": "openai/gpt-live-1",
+      "cost_usd": 0.013333333333333334,
+      "ttfb_ms": null,
+      "input_units": 0.0,
+      "output_units": 0.0,
+      "measurements": {
+        "audio_seconds": 16.0
+      },
+      "pricing_complete": true
+    },
+    {
+      "model": "openai/gpt-5.6-luna",
+      "cost_usd": 0.00014968,
+      "ttfb_ms": null,
+      "input_units": 2271.0,
+      "output_units": 28.0,
+      "measurements": {
+        "text_input": 2271,
+        "text_output": 28,
+        "cache_read": 1899,
+        "cache_write": 74
+      },
+      "pricing_complete": true
+    },
+    {
+      "model": "openai/gpt-5.6-luna",
+      "cost_usd": 0.00018183,
+      "ttfb_ms": null,
+      "input_units": 2352.0,
+      "output_units": 41.0,
+      "measurements": {
+        "text_input": 2352,
+        "text_output": 41,
+        "cache_read": 1899,
+        "cache_write": 81
+      },
+      "pricing_complete": true
+    },
+    {
+      "model": "openai/gpt-live-1",
+      "cost_usd": 0.013333333333333334,
+      "ttfb_ms": null,
+      "input_units": 0.0,
+      "output_units": 0.0,
+      "measurements": {
+        "audio_seconds": 16.0
+      },
+      "pricing_complete": true
+    },
+    {
+      "model": "openai/gpt-5.6-luna",
+      "cost_usd": 0.00022233,
+      "ttfb_ms": null,
+      "input_units": 2535.0,
+      "output_units": 40.0,
+      "measurements": {
+        "text_input": 2535,
+        "text_output": 40,
+        "cache_read": 1899,
+        "cache_write": 183
+      },
+      "pricing_complete": true
+    },
+    {
+      "model": "openai/gpt-live-1",
+      "cost_usd": 0.005,
+      "ttfb_ms": null,
+      "input_units": 0.0,
+      "output_units": 0.0,
+      "measurements": {
+        "audio_seconds": 6.0
+      },
+      "pricing_complete": true
+    }
+  ],
+  "events": [
+    {
+      "t": 10.61,
+      "kind": "caller",
+      "value": " I want an appointment booking voice agent for five clinics. Can I meet your technical lead on Friday"
+    },
+    {
+      "t": 13.28,
+      "kind": "tools",
+      "results": [
+        {
+          "name": "update_request",
+          "output": {
+            "revision": 1,
+            "need": "Appointment-booking voice agent for five clinics",
+            "day": "friday"
+          }
+        }
+      ]
+    },
+    {
+      "t": 15.78,
+      "kind": "caller",
+      "value": " Actually, make it Monday morning, not Friday"
+    },
+    {
+      "t": 18.98,
+      "kind": "tools",
+      "results": [
+        {
+          "name": "check_availability",
+          "output": {
+            "status": "superseded",
+            "message": "Caller spoke again; check latest request."
+          }
+        }
+      ]
+    },
+    {
+      "t": 20.87,
+      "kind": "tools",
+      "results": [
+        {
+          "name": "check_availability",
+          "output": {
+            "status": "superseded",
+            "message": "Update the request from the latest caller transcript before looking again."
+          }
+        }
+      ]
+    },
+    {
+      "t": 28.98,
+      "kind": "tools",
+      "results": [
+        {
+          "name": "update_request",
+          "output": {
+            "revision": 2,
+            "need": "Appointment-booking voice agent for five clinics",
+            "day": "monday"
+          }
+        }
+      ]
+    },
+    {
+      "t": 34.69,
+      "kind": "tools",
+      "results": [
+        {
+          "name": "check_availability",
+          "output": {
+            "status": "available",
+            "revision": 2,
+            "slots": [
+              "Monday 10:00",
+              "Monday 14:00"
+            ],
+            "timezone": "America/Toronto",
+            "simulation": true
+          }
+        }
+      ]
+    },
+    {
+      "t": 35.45,
+      "kind": "tools",
+      "results": [
+        {
+          "name": "propose_meeting",
+          "output": {
+            "status": "awaiting_confirmation",
+            "slot": "Monday 10:00",
+            "timezone": "America/Toronto",
+            "message": "Read this slot and ask for confirm."
+          }
+        }
+      ]
+    },
+    {
+      "t": 48.58,
+      "kind": "caller",
+      "value": " Confirm"
+    },
+    {
+      "t": 51.62,
+      "kind": "tools",
+      "results": [
+        {
+          "name": "book_meeting",
+          "output": {
+            "status": "booked",
+            "booking": {
+              "id": "SIM-001",
+              "slot": "Monday 10:00",
+              "timezone": "America/Toronto",
+              "need": "Appointment-booking voice agent for five clinics",
+              "attendees": "Visitor and the studio's technical lead",
+              "simulation": true
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="671" height="531" viewBox="0 0 671 531" font-family="'DejaVu Sans Mono', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace" font-size="14px">
+  <defs>
+    <marker id="rcd114c58-arrow-7c83a0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c83a0"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="671" height="531" fill="#ffffff"/>
+  <path d="M119.5 49.5 H249.5 a8 8 0 0 1 8 8 V107.5 a8 8 0 0 1 -8 8 H119.5 a8 8 0 0 1 -8 -8 V57.5 a8 8 0 0 1 8 -8 Z" fill="#eef0f7" stroke="#8a90a8"/>
+  <text x="184.5" y="77.9" fill="#1f2328" text-anchor="middle">Friday request</text>
+  <text x="184.5" y="96.9" fill="#1f2328" text-anchor="middle">revision 1</text>
+  <path d="M321.5 40 H476.5 a8 8 0 0 1 8 8 V117 a8 8 0 0 1 -8 8 H321.5 a8 8 0 0 1 -8 -8 V48 a8 8 0 0 1 8 -8 Z" fill="#eef0f7" stroke="#8a90a8"/>
+  <text x="399" y="68.4" fill="#1f2328" text-anchor="middle">Lookup starts</text>
+  <text x="399" y="87.4" fill="#1f2328" text-anchor="middle">captures revision</text>
+  <text x="399" y="106.4" fill="#1f2328" text-anchor="middle">and caller turn</text>
+  <path d="M292 181 H506 a8 8 0 0 1 8 8 V239 a8 8 0 0 1 -8 8 H292 a8 8 0 0 1 -8 -8 V189 a8 8 0 0 1 8 -8 Z" fill="#eee6f7" stroke="#7243ad"/>
+  <text x="399" y="209.4" fill="#1f2328" text-anchor="middle">Caller says Monday</text>
+  <text x="399" y="228.4" fill="#1f2328" text-anchor="middle">final transcript arrives</text>
+  <path d="M48 181 H220 a8 8 0 0 1 8 8 V239 a8 8 0 0 1 -8 8 H48 a8 8 0 0 1 -8 -8 V189 a8 8 0 0 1 8 -8 Z" fill="#fff1df" stroke="#b57933"/>
+  <text x="134" y="209.4" fill="#1f2328" text-anchor="middle">Old lookup rejected</text>
+  <text x="134" y="228.4" fill="#1f2328" text-anchor="middle">newer caller turn</text>
+  <path d="M309 303 H489 a8 8 0 0 1 8 8 V361 a8 8 0 0 1 -8 8 H309 a8 8 0 0 1 -8 -8 V311 a8 8 0 0 1 8 -8 Z" fill="#eee6f7" stroke="#7243ad"/>
+  <text x="399" y="331.4" fill="#1f2328" text-anchor="middle">Latest request saved</text>
+  <text x="399" y="350.4" fill="#1f2328" text-anchor="middle">revision 2</text>
+  <path d="M69 303 H207 a8 8 0 0 1 8 8 V361 a8 8 0 0 1 -8 8 H69 a8 8 0 0 1 -8 -8 V311 a8 8 0 0 1 8 -8 Z" fill="#eee6f7" stroke="#7243ad"/>
+  <text x="138" y="331.4" fill="#1f2328" text-anchor="middle">New lookup</text>
+  <text x="138" y="350.4" fill="#1f2328" text-anchor="middle">proposes Monday</text>
+  <path d="M48 425 H228 a8 8 0 0 1 8 8 V483 a8 8 0 0 1 -8 8 H48 a8 8 0 0 1 -8 -8 V433 a8 8 0 0 1 8 -8 Z" fill="#eee6f7" stroke="#7243ad"/>
+  <text x="138" y="453.4" fill="#1f2328" text-anchor="middle">Fresh confirmation</text>
+  <text x="138" y="472.4" fill="#1f2328" text-anchor="middle">then guarded booking</text>
+  <g font-size="12px">
+  <text x="292" y="454.2" fill="#1f2328" text-anchor="start">Transcript arrival is the guard's boundary.</text>
+  <text x="292" y="470.2" fill="#1f2328" text-anchor="start">Missed speech cannot invalidate an old request.</text>
+  </g>
+  <path d="M 257.5 82.5 L 313.5 82.5" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#rcd114c58-arrow-7c83a0)"/>
+  <path d="M 399 125 L 399 181" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#rcd114c58-arrow-7c83a0)"/>
+  <path d="M 284 214 L 228 214" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#rcd114c58-arrow-7c83a0)"/>
+  <path d="M 399 247 L 399 303" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#rcd114c58-arrow-7c83a0)"/>
+  <path d="M 301 336 L 215 336" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#rcd114c58-arrow-7c83a0)"/>
+  <path d="M 138 369 L 138 425" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#rcd114c58-arrow-7c83a0)"/>
+</svg>
