@@ -1,0 +1,16 @@
+diagram theme: dark
+default edge line: (path: square, corners: rounded)
+style dim text: (color: theme-muted)
+style active fill: theme-primary-subtle border: theme-primary line: theme-primary
+style stale fill: theme-fill border: theme-border line: theme-muted text: (color: theme-muted)
+node caller "Visitor / [dim]speaks and listens[/dim]" badge: laptop
+node transport "LiveKit / [dim]audio transport[/dim]" below caller badge: cubes
+node voice "GPT-Live / [dim]voice conversation[/dim]" below transport badge: cube style: active
+node backend "Responses model / [dim]selects tools[/dim]" below voice badge: cubes style: active
+node worker "Python worker / [dim]validates and executes[/dim]" below backend badge: package
+node calendar "Calendar state / [dim]simulated booking[/dim]" below worker badge: database
+edge caller <-> transport "audio"
+edge transport <-> voice "audio" style: active
+edge voice <-> backend "delegation" style: active
+edge backend <-> worker "tools + results"
+edge worker <-> calendar "guarded actions"
