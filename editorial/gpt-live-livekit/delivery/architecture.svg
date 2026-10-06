@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1063" height="391" viewBox="0 0 1063 391" font-family="'DejaVu Sans Mono', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace" font-size="14px">
+  <defs>
+    <marker id="r255d76cc-arrow-7c83a0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c83a0"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="1063" height="391" fill="#ffffff"/>
+  <path d="M48 40 H212 a8 8 0 0 1 8 8 V98 a8 8 0 0 1 -8 8 H48 a8 8 0 0 1 -8 -8 V48 a8 8 0 0 1 8 -8 Z" fill="#eef0f7" stroke="#8a90a8"/>
+  <text x="130" y="68.4" fill="#1f2328" text-anchor="middle">Visitor</text>
+  <text x="130" y="87.4" fill="#1f2328" text-anchor="middle">speaks and listens</text>
+  <path d="M342.4 40 H480.4 a8 8 0 0 1 8 8 V98 a8 8 0 0 1 -8 8 H342.4 a8 8 0 0 1 -8 -8 V48 a8 8 0 0 1 8 -8 Z" fill="#eef0f7" stroke="#8a90a8"/>
+  <text x="411.4" y="68.4" fill="#1f2328" text-anchor="middle">LiveKit</text>
+  <text x="411.4" y="87.4" fill="#1f2328" text-anchor="middle">audio transport</text>
+  <path d="M841.8 40 H1005.8 a8 8 0 0 1 8 8 V98 a8 8 0 0 1 -8 8 H841.8 a8 8 0 0 1 -8 -8 V48 a8 8 0 0 1 8 -8 Z" fill="#eee6f7" stroke="#7243ad"/>
+  <text x="923.8" y="68.4" fill="#1f2328" text-anchor="middle">GPT-Live</text>
+  <text x="923.8" y="87.4" fill="#1f2328" text-anchor="middle">voice conversation</text>
+  <path d="M854.8 187.4 H992.8 a8 8 0 0 1 8 8 V245.4 a8 8 0 0 1 -8 8 H854.8 a8 8 0 0 1 -8 -8 V195.4 a8 8 0 0 1 8 -8 Z" fill="#eee6f7" stroke="#7243ad"/>
+  <text x="923.8" y="215.8" fill="#1f2328" text-anchor="middle">Responses model</text>
+  <text x="923.8" y="234.8" fill="#1f2328" text-anchor="middle">selects tools</text>
+  <path d="M426.4 177.9 H581.4 a8 8 0 0 1 8 8 V254.9 a8 8 0 0 1 -8 8 H426.4 a8 8 0 0 1 -8 -8 V185.9 a8 8 0 0 1 8 -8 Z" fill="#f5f5f5" stroke="#777777"/>
+  <text x="503.9" y="206.3" fill="#1f2328" text-anchor="middle">Python worker</text>
+  <text x="503.9" y="225.3" fill="#1f2328" text-anchor="middle">validates request</text>
+  <text x="503.9" y="244.3" fill="#1f2328" text-anchor="middle">executes tools</text>
+  <path d="M48 177.9 H212 a8 8 0 0 1 8 8 V254.9 a8 8 0 0 1 -8 8 H48 a8 8 0 0 1 -8 -8 V185.9 a8 8 0 0 1 8 -8 Z" fill="#f5f5f5" stroke="#777777"/>
+  <text x="130" y="206.3" fill="#1f2328" text-anchor="middle">Simulated calendar</text>
+  <text x="130" y="225.3" fill="#1f2328" text-anchor="middle">current revision</text>
+  <text x="130" y="244.3" fill="#1f2328" text-anchor="middle">confirmed booking</text>
+  <g font-size="12px">
+  <text x="309.4" y="331.1" fill="#1f2328" text-anchor="start">The voice model talks. The backend chooses tools.</text>
+  <text x="309.4" y="347.1" fill="#1f2328" text-anchor="start">Application code decides whether a booking is allowed.</text>
+  </g>
+  <path d="M 220 73 L 334.4 73" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#r255d76cc-arrow-7c83a0)" marker-start="url(#r255d76cc-arrow-7c83a0)"/>
+  <rect x="251.2" y="63.5" width="52" height="19" fill="#ffffff"/>
+  <text x="277.2" y="77.9" fill="#1f2328" text-anchor="middle">audio</text>
+  <path d="M 488.4 73 L 833.8 73" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#r255d76cc-arrow-7c83a0)" marker-start="url(#r255d76cc-arrow-7c83a0)"/>
+  <rect x="635.1" y="63.5" width="52" height="19" fill="#ffffff"/>
+  <text x="661.1" y="77.9" fill="#1f2328" text-anchor="middle">audio</text>
+  <path d="M 923.8 106 L 923.8 187.4" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#r255d76cc-arrow-7c83a0)" marker-start="url(#r255d76cc-arrow-7c83a0)"/>
+  <rect x="826.3" y="137.2" width="195" height="19" fill="#ffffff"/>
+  <text x="923.8" y="151.6" fill="#1f2328" text-anchor="middle">delegation and results</text>
+  <path d="M 846.8 220.4 L 589.4 220.4" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#r255d76cc-arrow-7c83a0)" marker-start="url(#r255d76cc-arrow-7c83a0)"/>
+  <rect x="620.6" y="210.9" width="195" height="19" fill="#ffffff"/>
+  <text x="718.1" y="225.3" fill="#1f2328" text-anchor="middle">tool calls and results</text>
+  <path d="M 418.4 220.4 L 220 220.4" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#r255d76cc-arrow-7c83a0)" marker-start="url(#r255d76cc-arrow-7c83a0)"/>
+  <rect x="251.2" y="210.9" width="136" height="19" fill="#ffffff"/>
+  <text x="319.2" y="225.3" fill="#1f2328" text-anchor="middle">guarded actions</text>
+</svg>

@@ -1,0 +1,18 @@
+diagram theme: light
+default edge line: (path: square, corners: rounded)
+style stale fill: #fff1df border: #b57933
+style current fill: #eee6f7 border: #7243ad
+node friday "Friday request / revision 1"
+node lookup "Lookup starts / captures revision / and caller turn" right of friday
+node correction "Caller says Monday / final transcript arrives" below lookup style: current
+node reject "Old lookup rejected / newer caller turn" left of correction style: stale
+node monday "Latest request saved / revision 2" below correction style: current
+node fresh "New lookup / proposes Monday" left of monday style: current
+node confirm "Fresh confirmation / then guarded booking" below fresh style: current
+edge friday -> lookup
+edge lookup -> correction
+edge correction -> reject
+edge correction -> monday
+edge monday -> fresh
+edge fresh -> confirm
+node boundary "Transcript arrival is the guard's boundary. / Missed speech cannot invalidate an old request." (wrap: 48) shape: none right of confirm

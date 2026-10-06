@@ -1,0 +1,16 @@
+diagram theme: light
+default edge line: (path: square, corners: rounded)
+style voice fill: #eee6f7 border: #7243ad
+style app fill: #f5f5f5 border: #777777
+node caller "Visitor / speaks and listens"
+node livekit "LiveKit / audio transport" right of caller
+node frontend "GPT-Live / voice conversation" right of livekit style: voice
+node backend "Responses model / selects tools" below frontend style: voice
+node worker "Python worker / validates request / executes tools" left of backend style: app
+node state "Simulated calendar / current revision / confirmed booking" left of worker style: app
+edge caller <-> livekit "audio"
+edge livekit <-> frontend "audio"
+edge frontend <-> backend "delegation and results"
+edge backend <-> worker "tool calls and results"
+edge worker <-> state "guarded actions"
+node rule "The voice model talks. The backend chooses tools. / Application code decides whether a booking is allowed." (wrap: 66) shape: none below worker

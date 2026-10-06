@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0d9488" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#18181b" media="(prefers-color-scheme: dark)">
+<title>GPT-Live with LiveKit: Beyond the First Working Call</title>
+<meta name="description" content="Build a GPT-Live sales demo with LiveKit: separate voice and tool prompts, handle changed requests, guard simulated bookings, and measure both usage streams.">
+<link rel="canonical" href="https://mahimai.ca/blog/gpt-live-livekit-beyond-first-call">
+<meta name="author" content="Mahimai Raja J">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta property="og:type" content="article">
+<meta property="og:title" content="GPT-Live with LiveKit: Beyond the First Working Call">
+<meta property="og:description" content="Build a GPT-Live sales demo with LiveKit: separate voice and tool prompts, handle changed requests, guard simulated bookings, and measure both usage streams.">
+<meta property="og:url" content="https://mahimai.ca/blog/gpt-live-livekit-beyond-first-call">
+<meta property="og:image" content="https://mahimai.ca/blog/gpt-live-livekit-beyond-first-call/hero.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A visitor speaks to a voice agent while a separate tool system checks a calendar.">
+<meta property="og:site_name" content="Mahimai">
+<meta property="article:published_time" content="2026-10-05">
+<meta property="article:author" content="Mahimai Raja J">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="GPT-Live with LiveKit: Beyond the First Working Call">
+<meta name="twitter:description" content="Build a GPT-Live sales demo with LiveKit: separate voice and tool prompts, handle changed requests, guard simulated bookings, and measure both usage streams.">
+<meta name="twitter:image" content="https://mahimai.ca/blog/gpt-live-livekit-beyond-first-call/hero.jpg">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "BlogPosting", "headline": "GPT-Live with LiveKit: Beyond the First Working Call", "description": "Build a GPT-Live sales demo with LiveKit: separate voice and tool prompts, handle changed requests, guard simulated bookings, and measure both usage streams.", "image": "https://mahimai.ca/blog/gpt-live-livekit-beyond-first-call/hero.jpg", "datePublished": "2026-10-05", "dateModified": "2026-10-05", "author": {"@type": "Person", "name": "Mahimai Raja J"}, "wordCount": 2778, "keywords": "['gpt-live', 'livekit', 'voice-ai', 'tool-calling']", "inLanguage": "en", "mainEntityOfPage": {"@type": "WebPage", "@id": "https://mahimai.ca/blog/gpt-live-livekit-beyond-first-call"}}</script>
+<style>
+:root{--bg:#fafaf9;--surface:#fff;--text:#1c1917;--muted:#57534e;--soft:#78716c;--accent:#0d9488;--accent-soft:#ccfbf1;--accent-deep:#115e59;--border:#e7e5e4;--code-bg:#f5f5f4;--warn:#b91c1c;--shadow:0 1px 3px rgba(0,0,0,.06),0 4px 12px rgba(0,0,0,.04)}
+@media (prefers-color-scheme:dark){:root{--bg:#18181b;--surface:#27272a;--text:#fafafa;--muted:#a1a1aa;--soft:#71717a;--accent:#2dd4bf;--accent-soft:#134e4a;--accent-deep:#99f6e4;--border:#3f3f46;--code-bg:#1f1f23;--warn:#fca5a5;--shadow:0 1px 3px rgba(0,0,0,.4),0 4px 12px rgba(0,0,0,.3)}}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.65;margin:0;font-size:17px;-webkit-font-smoothing:antialiased}
+article{max-width:740px;margin:0 auto;padding:3rem 1.5rem 5rem}
+.kicker{font-family:ui-monospace,"SF Mono",Monaco,monospace;font-size:.78rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin:0 0 .85rem;font-weight:600}
+h1{font-size:clamp(2rem,5vw,2.85rem);line-height:1.12;letter-spacing:-.025em;margin:0 0 1.1rem;font-weight:800}
+.dek{color:var(--muted);font-size:clamp(1.05rem,2.5vw,1.2rem);line-height:1.5;margin:0 0 1.75rem;max-width:60ch}
+.byline{color:var(--soft);font-size:.875rem;font-family:ui-monospace,monospace;margin:0 0 2.5rem}
+.byline strong{color:var(--text);font-weight:600}
+.hero{margin:0 0 2.5rem;background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow)}
+.hero img{display:block;width:100%;height:auto;aspect-ratio:1200/630;object-fit:cover}
+h2{font-size:clamp(1.4rem,3vw,1.75rem);line-height:1.22;letter-spacing:-.015em;margin:3rem 0 1rem;font-weight:700;scroll-margin-top:1rem}
+h3{font-size:1.2rem;margin:2rem 0 .75rem;font-weight:700}
+p{margin:0 0 1.25rem}
+a{color:var(--accent);text-decoration-thickness:1px;text-underline-offset:3px}
+a:hover{color:var(--accent-deep)}
+code{font-family:ui-monospace,"SF Mono",Monaco,monospace;font-size:.9em;background:var(--code-bg);border:1px solid var(--border);padding:.1em .4em;border-radius:4px}
+pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:1rem;overflow-x:auto;font-size:.875rem}
+pre code{background:none;border:none;padding:0}
+blockquote{border-left:3px solid var(--accent);padding:.4rem 0 .4rem 1.25rem;margin:0 0 1.5rem;color:var(--muted)}
+ul,ol{margin:0 0 1.25rem;padding-left:1.5rem}
+li{margin:.35rem 0}
+strong{font-weight:700;color:var(--text)}
+img{max-width:100%;height:auto}
+.post-footer{margin-top:4rem;padding-top:2rem;border-top:1px solid var(--border);font-size:.875rem;color:var(--muted);font-family:ui-monospace,monospace;display:flex;flex-wrap:wrap;gap:.6rem 1.5rem;justify-content:space-between}
+.post-footer a{color:var(--accent);text-decoration:none}
+::selection{background:var(--accent);color:var(--bg)}
+@media print{body{background:#fff;color:#000;font-size:11pt}article{max-width:none;padding:0 1rem}.hero{box-shadow:none}}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<article>
+<header>
+<p class="kicker">Article</p>
+<h1>GPT-Live with LiveKit: Beyond the First Working Call</h1>
+<p class="dek">Build a GPT-Live sales demo with LiveKit: separate voice and tool prompts, handle changed requests, guard simulated bookings, and measure both usage streams.</p>
+<p class="byline"><strong>By Mahimai Raja J</strong> &middot; 2026-10-05 &middot; 13 min read &middot; 2778 words</p>
+</header>
+<figure class="hero"><img src="hero.jpg" alt="A visitor speaks to a voice agent while a separate tool system checks a calendar." width="1200" height="630"></figure>
+<p>Build voice agents that handle interruptions, changing requests, and tools using GPT-Live’s thinking, commentary, and instruction controls.</p>
+<p>A visitor wants a voice agent for five clinics. They ask to meet on Friday. While the calendar lookup runs, they add: “Actually, Monday. And include our engineering lead.”</p>
+<p>The agent now has two jobs: keep up with the conversation and stop the old request from becoming the outcome. A fluent acknowledgement only solves the first.</p>
+<p>This walkthrough uses an inbound sales demo with a simulated calendar. It collects a use case, checks illustrative slots, and asks for confirmation before recording one meeting in memory. It makes no real calendar or CRM writes. The final development smoke test used synthetic caller audio and reached a confirmed Monday slot. It also exposed why the application needs more than a prompt telling the model to respect corrections.</p>
+<blockquote>
+<p><strong>Key Takeaways</strong></p>
+<ul>
+<li>Give the voice model conversation guidance and the backend model tool procedures.</li>
+<li>Use thinking for background facts, commentary for something to say, and instructions for ongoing guidance.</li>
+<li>Keep the current request and booking checks in application code.</li>
+<li>Test audible interruptions separately from tool outcomes, and collect voice duration separately from backend tokens.</li>
+</ul>
+</blockquote>
+<h2>Changing Requests</h2>
+<p>Treat a correction as a change to the task state. A lookup that started for Friday should carry enough identity for the application to recognise that it no longer answers the request.</p>
+<p>The demo stores the visitor's need, preferred weekday, and attendee roles. Changing any of these increments a request revision and clears the previous offer. Each request update also records which finalised caller turn it processed in <code>request_turn</code>. Availability first requires that turn to be current, then captures the revision and turn before waiting.</p>
+<p>This is the key check from the implementation:</p>
+<pre><code class="language-python">turn = self.user_turn
+if self.request_turn != turn:
+    return {
+        &quot;status&quot;: &quot;superseded&quot;,
+        &quot;message&quot;: &quot;Update the request from the latest caller transcript before looking again.&quot;,
+    }
+await asyncio.sleep(delay)
+if revision != self.revision or turn != self.user_turn:
+    return {
+        &quot;status&quot;: &quot;superseded&quot;,
+        &quot;message&quot;: &quot;Caller spoke again; check latest request.&quot;,
+    }
+</code></pre>
+<p>The turn counter advances on each <strong>finalised caller transcript</strong>. If a new transcript arrives while the lookup waits, its result is rejected even if the backend hasn't interpreted the correction yet. The backend must call <code>update_request</code> with the newer request before looking again. A retry using the old stored day is rejected even though it starts after the correction. In the recorded smoke, the backend attempted exactly that retry; this second check stopped it.</p>
+<p>This proves an update occurred after the transcript. It cannot prove the backend interpreted that transcript correctly. That semantic boundary still needs conversation tests.</p>
+<p>That is deliberately conservative. “Thanks” can invalidate the pending lookup too. For this small demo, doing another lookup is preferable to guessing whether a new utterance changes the appointment.</p>
+<p>The boundary matters: this check observes transcript events, not the caller's intentions directly. If speech recognition misses “Monday,” the revision logic cannot recover a correction it never received. The <a href="https://mahimai.ca/blog/how-your-voice-travels-through-webrtc">WebRTC walkthrough</a> follows the audio path that precedes this application decision.</p>
+<figure class="article-illustration">
+  <img src="correction.svg" alt="A newer Monday transcript invalidates Friday&#x27;s lookup. A fresh lookup and confirmation precede the simulated booking." loading="lazy">
+  <figcaption>A new caller turn invalidates work that began before it. This guard depends on receiving the transcript.</figcaption>
+</figure>
+
+<h2>How It Works</h2>
+<p>GPT-Live handles a conversation while delegated work runs. In the demo, a Responses backend selects tools and the LiveKit worker executes the Python functions. The application owns the booking state. These are separate responsibilities in <a href="https://developers.openai.com/api/docs/guides/live">OpenAI's GPT-Live architecture</a>.</p>
+<figure class="article-illustration">
+  <img src="architecture.svg" alt="LiveKit carries visitor audio to GPT-Live. A Responses backend delegates tool calls to the Python worker, which guards calendar state." loading="lazy">
+  <figcaption>Conversation, tool selection, and booking permission have different owners.</figcaption>
+</figure>
+
+<p>LiveKit exposes <code>GPTLiveModel</code> through an adapter that fits <code>AgentSession</code>. This excerpt shows the demo's session configuration; its prompts and assistant class are defined elsewhere in the example:</p>
+<pre><code class="language-python">session = AgentSession(
+    llm=openai.realtime.GPTLiveModel(
+        voice=&quot;marin&quot;,
+        responses_options={
+            &quot;model&quot;: os.getenv(&quot;SDR_BACKEND_MODEL&quot;, &quot;gpt-5.6-luna&quot;),
+            &quot;instructions&quot;: BACKEND_INSTRUCTIONS,
+            &quot;parallel_tool_calls&quot;: False,
+            &quot;max_output_tokens&quot;: 600,
+            &quot;reasoning&quot;: {&quot;effort&quot;: &quot;low&quot;},
+        },
+    ),
+    vad=silero.VAD.load(),
+)
+</code></pre>
+<p>The example pins <code>livekit-agents[openai,silero]==1.8.5</code>. You need Python 3.11 or later, <code>uv</code>, LiveKit credentials, and an OpenAI project with GPT-Live access. The <a href="https://docs.livekit.io/agents/models/realtime/plugins/gpt-live/">LiveKit plugin guide</a> covers installation and authentication.</p>
+<p>The <a href="https://github.com/mahimairaja/awesome-voice-apps/tree/3cc6f001ca064b53ba777667b0e1bd50ad49fff3/demos/talk-to-our-team">demo source</a> includes the assistant, booking state, and tests. It pins the published VoiceGateway 0.27.0 package for metering. From that directory, copy the environment template, add credentials locally, and start the console:</p>
+<pre><code class="language-sh">cp .env.example .env
+uv sync
+uv run agent.py download-files
+uv run agent.py console
+</code></pre>
+<p>For a browser client, run <code>uv run agent.py dev</code> and dispatch the worker using the agent name <code>talk-to-our-team</code>. The simulated slots use weekday and time labels in <code>America/Toronto</code>; they aren't dated appointments.</p>
+<h2>Separate Prompts</h2>
+<p>Write the voice prompt around what the visitor experiences. Write the backend prompt around how the work proceeds.</p>
+<p>The demo's voice instructions ask for short responses, one question at a time, and no private contact details. They tell the agent to delegate service-fit, availability, and booking requests, and to acknowledge slow work once. Greetings need no calendar lookup.</p>
+<p>The backend instructions describe the procedure:</p>
+<ol>
+<li>Record the latest request with <code>update_request</code>.</li>
+<li>Check availability for that revision.</li>
+<li>Propose one returned slot and ask for a fresh confirmation.</li>
+<li>Call <code>book_meeting</code> only after that confirmation.</li>
+</ol>
+<p>This split keeps the spoken experience understandable without omitting the tool procedure. <a href="https://developers.openai.com/api/docs/guides/live-delegation">OpenAI's delegation guide</a> explains how the backend receives delegated work.</p>
+<p>A prompt still cannot enforce a booking invariant. “Never book without confirmation” belongs in the backend instructions, but the function must also reject an invalid attempt. The demo has both: instructions that guide the model and checks that run when the model calls a tool.</p>
+<p>Disabling parallel tool calls makes the intended sequence easier to inspect. It doesn't prove that a caller heard an offer or that every tool call uses the latest request. Those need their own evidence and checks.</p>
+<h2>Context Controls</h2>
+<p>Choose a context channel according to what the voice model should do with the information. The installed plugin exposes three methods on <code>self.duplex_session</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Purpose</th>
+<th>Example in this conversation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>append_thinking</code></td>
+<td>Supply background information</td>
+<td>The lookup finished, but no meeting is booked.</td>
+</tr>
+<tr>
+<td><code>append_commentary</code></td>
+<td>Give the model something to say in its own words</td>
+<td>Ask the visitor what they want to build.</td>
+</tr>
+<tr>
+<td><code>append_instructions</code></td>
+<td>Add guidance for the rest of the session</td>
+<td>Do not request an email address in this demo.</td>
+</tr>
+</tbody>
+</table>
+<p>Here, “thinking” is application-supplied context. It isn't an interface for reading the model's private reasoning.</p>
+<p>At startup, the demo appends the privacy instruction and the fact that appointments are simulated. It requests its greeting through <code>session.generate_reply</code>, which the installed adapter routes through commentary. After a successful availability lookup, it appends a brief status. A superseded lookup returns its rejection to the backend without adding another voice-side status:</p>
+<pre><code class="language-python">if result[&quot;status&quot;] == &quot;available&quot;:
+    self.duplex_session.append_thinking(
+        f&quot;Current calendar lookup is for {self.booking.day}. &quot;
+        &quot;No meeting has been booked. Wait for the backend's proposed slot.&quot;
+    )
+</code></pre>
+<p>That status gives the voice side context without asking it to announce another result immediately. The structured tool return supplies the backend with the actual slots or rejection.</p>
+<p>The booking function returns its result through the backend and doesn't append the same result as commentary. Sending both would create two paths for announcing the outcome. Keeping one announcement path makes repeated speech easier to investigate.</p>
+<p>Each append has a 500-token limit in this plugin, so keep the payload focused on the next decision. The methods queue their appends without waiting. An append acknowledgement concerns context injection; it doesn't establish that the caller heard a sentence. Keep context acknowledgement and audio playback as separate events when instrumenting the session.</p>
+<h2>Running Tools</h2>
+<p>Design tool results so the next step follows from an explicit status. The demo's availability function returns <code>available</code> or <code>superseded</code>. Proposing a valid slot returns <code>awaiting_confirmation</code>. Booking can return <code>needs_confirmation</code>, <code>rejected</code>, <code>booked</code>, or <code>already_booked</code>.</p>
+<p>Those distinctions matter during a conversation. “The function returned” doesn't tell the agent whether it may announce a meeting.</p>
+<p>The confirmation function checks that the supplied revision is current, that the slot came from the offer and matches the proposal, and that a newer caller turn contains a standalone confirmation. “Yes, but Monday instead” doesn't match the demo's confirmation pattern. It needs another request update.</p>
+<p>A delegated booking call can also arrive before LiveKit finalises the caller transcript. The async tool waits up to three seconds for a newer caller event, then runs the same confirmation checks. If no qualifying transcript arrives, it refuses to book. Tool arguments are never accepted as evidence of consent.</p>
+<p>Once a simulated booking exists, subsequent attempts return the existing record. They don't create another meeting or silently change the first one. That protects the in-memory demonstration from a repeated booking call.</p>
+<p>A real calendar needs more. Persist an operation identifier, use provider-side idempotency where available, and verify the authoritative result after a timeout or reconnect. A worker's memory cannot establish whether an external service completed a request before the connection failed.</p>
+<p>Two further checks close gaps around the proposal. A newer caller turn after lookup completion prevents that result from being proposed. After a proposal, any transcript that is not a standalone confirmation clears it, so a correction followed by a later “yes” cannot confirm the old proposal. These rules still depend on transcript events and do not prove exact offer playback.</p>
+<h2>Handling Interruptions</h2>
+<p>An interruption affects speech playback and application work on different timelines. Stopping an audible reply doesn't establish that a pending lookup or booking has been cancelled.</p>
+<p>GPT-Live decides its own conversational turns. LiveKit can stop local playback while the model continues until it stops itself, as the <a href="https://docs.livekit.io/agents/models/realtime/plugins/gpt-live/#turn-detection-and-interruption">plugin's interruption guidance</a> explains. The demo includes VAD for that local playback path. Use <a href="https://mahimai.ca/learn/components/turn-detection">turn-detection evaluation</a> to separate detecting speech from deciding that a conversational turn has ended.</p>
+<p>For the Friday-to-Monday scenario, inspect three separate observations:</p>
+<ul>
+<li>Did the old speech stop when the caller began correcting it?</li>
+<li>Did a finalised transcript contain the correction?</li>
+<li>Did the lookup and eventual proposal use the updated request?</li>
+</ul>
+<p>A pleasant-sounding call can fail the third check. A correct booking record can coexist with an awkward interruption. Saving only the final transcript hides part of both problems.</p>
+<p>The demo adds a two-second lookup delay so there is time to try a correction while work is pending. <code>SDR_LOOKUP_DELAY=0</code> removes it. This is a test control, not a measurement of model or calendar latency.</p>
+<h2>Conversation Memory</h2>
+<p>Keep conversation context and business state separately inspectable. The transcript records conversational turns; the booking object records the current request, available slots, proposal, and result.</p>
+<p>GPT-Live supports appending context during a session. <a href="https://developers.openai.com/api/docs/guides/live-conversations">OpenAI's session guide</a> describes that lifecycle. In LiveKit, the three context appends don't appear in <code>session.history</code>, so a transcript export alone cannot reconstruct every instruction or fact the application supplied.</p>
+<p>For a useful diagnostic record, log request revisions, tool arguments and statuses, and deliberate context appends alongside the transcript. Record why an offer was invalidated. Redact private data and avoid collecting details the demonstration doesn't need.</p>
+<p>This also helps distinguish intent from delivery. A proposal stored in application state shows what the agent was meant to offer. It doesn't prove the caller heard the exact slot. If your product requires that evidence, connect the proposal to the relevant speech and playback events instead of treating a tool return as proof.</p>
+<h2>API Surprises</h2>
+<p>Check the layer when copying a default or limitation. The API, LiveKit adapter, and application don't expose identical controls.</p>
+<table>
+<thead>
+<tr>
+<th>Detail</th>
+<th>Consequence for this demo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LiveKit defaults to Responses delegation; the direct API's omitted delegation selects client mode.</td>
+<td>Set or verify delegation when porting configuration.</td>
+</tr>
+<tr>
+<td>The plugin restricts replacing instruction sets after startup. The API supports updates to supported backend settings.</td>
+<td>Treat the plugin restriction as version-specific. Use supported context appends for standing guidance here.</td>
+</tr>
+<tr>
+<td>Client delegation has no ordinary function-tool execution path.</td>
+<td>Keep Responses mode for this example.</td>
+</tr>
+</tbody>
+</table>
+<p>The first two distinctions are documented across <a href="https://developers.openai.com/api/docs/guides/live-conversations">session management</a>, <a href="https://developers.openai.com/api/docs/guides/live-delegation">delegation</a>, and the plugin guide.</p>
+<p>There is also a concrete documentation mismatch to watch: the guide describes a warning for registered function tools in client mode, while the installed Python 1.8.5 implementation raises <code>RealtimeError</code>. If you choose client mode, leave registered tools empty and handle delegation events yourself. Pinning the version makes this behaviour reproducible.</p>
+<h2>Measuring Results</h2>
+<p>Collect the voice session and backend work as separate usage streams. On October 5, 2026, the <a href="https://developers.openai.com/api/docs/models/gpt-live-1">GPT-Live 1 model page</a> lists voice pricing at $0.05 per minute, billed per second, with backend model and tool charges additional. That is a voice-session rate, not the total cost of a call.</p>
+<p>The installed plugin converts cumulative provider seconds into incremental <code>session_duration</code> metrics. Sum those increments once. Preserve session and event identity so a retry in your collector doesn't count them twice, and collect the final usage emitted during close.</p>
+<p>Backend token metrics need their own model identity. Don't label every event with the voice model's name simply because both streams pass through the same session.</p>
+<p>Keep a record of the measured quantity, model, unit, rate source, and whether pricing is complete. An unknown backend rate should produce an incomplete estimate. Zero token counts on a duration-based voice event don't mean that part of the call was free.</p>
+<p>The plugin also uses <code>ttft=-1</code> when that measurement is unavailable. Exclude it from latency calculations. Measure an actual interval, such as the time from a recognised correction to the first audible acknowledgement, before reporting response latency.</p>
+<p>The synthetic audio smoke used the public <code>voicegateway.attach(session, ...)</code> integration. Its recorded provider usage and estimated costs were:</p>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Recorded quantity</th>
+<th>Estimated USD</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GPT-Live voice session</td>
+<td>53 billable seconds</td>
+<td>$0.04416667</td>
+</tr>
+<tr>
+<td>GPT-5.6 Luna backend</td>
+<td>18,265 input; 549 output tokens</td>
+<td>$0.00353689</td>
+</tr>
+<tr>
+<td>Combined provider estimate</td>
+<td>Voice plus backend</td>
+<td><strong>$0.04770356</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The input total includes 5,697 cached reads and 5,011 cache writes, leaving 7,557 ordinary input tokens. The <a href="https://developers.openai.com/api/docs/models/gpt-5.6-luna">GPT-5.6 Luna pricing page</a> lists $0.20 per million input tokens, $0.02 for cached input, and $1.20 for output, with cache writes charged at 1.25 times the ordinary input rate. The estimate therefore prices cache writes at $0.25 per million, rather than charging all non-cached input at the same rate. The 257 reported reasoning tokens are already included in the 549 output tokens; adding them again would double-count them.</p>
+<p>These are rate-based estimates from one run, not an invoice reconciliation. They exclude caller-audio generation, hosting, transport, and any other deployment costs. The duration collector included the final six-second increment at shutdown. Unavailable time-to-first-token values remained unknown rather than becoming zero-latency observations.</p>
+<p>The <a href="https://github.com/mahimailabs/voicegateway/pull/311">VoiceGateway metering changes</a> shipped in version 0.27.0, which this example pins. A clean install of that published package passed the demo's offline tests. The recorded native smoke used the same metering implementation before release; it did not test a hosted service.</p>
+<p><a href="smoke.json">Download the synthetic call trace</a> to inspect the final state, tool outcomes, and individual usage records. Internal request identifiers have been removed. This is one development run, not a representative sample of callers.</p>
+<h2>Real Conversation Tests</h2>
+<p>Use offline tests to prove state transitions, then use recorded conversation tests to examine the path into those transitions. The demo has 16 passing offline tests: 14 state cases, including parametrised cases, and two async tests for the final-transcript race. VoiceGateway has 58 passing focused tests; its full local suite recorded 3,916 passed, 25 skipped, and two expected failures. These counts describe development checks, not a reliability rate.</p>
+<p>Run the demo tests from its directory:</p>
+<pre><code class="language-sh">uv run pytest -q
+</code></pre>
+<p>The seventh native development run fed synthetic caller audio into a real GPT-Live session through LiveKit's <code>AgentSession</code>, with Responses delegation and the public metering attachment. It began with a request to meet the technical lead on Friday, corrected the day to Monday morning, and ended with the in-memory booking <code>SIM-001</code> for Monday 10:00 in Toronto time.</p>
+<table>
+<thead>
+<tr>
+<th>Elapsed event time</th>
+<th>Observed event</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>15.78 s</td>
+<td>Finalised caller transcript changes Friday to Monday morning.</td>
+</tr>
+<tr>
+<td>18.98 s</td>
+<td>Original availability lookup returns <code>superseded</code>.</td>
+</tr>
+<tr>
+<td>20.87 s</td>
+<td>Retry without an updated request is also rejected.</td>
+</tr>
+<tr>
+<td>28.98 s</td>
+<td>Request update records Monday as revision 2.</td>
+</tr>
+<tr>
+<td>35.45 s</td>
+<td>Tool proposes Monday 10:00.</td>
+</tr>
+<tr>
+<td>48.58 s</td>
+<td>Finalised caller transcript contains “Confirm”.</td>
+</tr>
+<tr>
+<td>51.62 s</td>
+<td>Booking tool returns the simulated Monday meeting.</td>
+</tr>
+</tbody>
+</table>
+<p>These are event times from one development trace. They are not audible response-latency measurements. The test used a deliberate five-second lookup delay and synthetic input; it did not exercise a LiveKit room, browser, telephone connection, or hosted deployment.</p>
+<p>Earlier development runs failed to complete the intended flow or produced a stale proposal. That prompted changes to the guards and transcript handling. The successful seventh run demonstrates the final path once; it does not establish seven-run reliability, general speech-recognition accuracy, or proof that a human heard the complete offer.</p>
+<p>Extend this test with a correction after lookup completion, “yes, but Monday instead,” silence after an offer, repeated confirmation, and a disconnect during work. For each run, compare what was spoken, what was transcribed, which revision each tool used, and the final simulated booking.</p>
+<p>Record the package version, prompts, model settings, and test input with the outcome. As with <a href="https://mahimai.ca/blog/your-smoke-run-is-lying-to-you">a benchmark smoke run</a>, a successful execution is only useful evidence when you know what it exercised. The useful next test takes the same correction through the actual client and checks playback as well as state, while retaining the tool and usage evidence that made this failure visible.</p>
+<footer class="post-footer"><span>Published at <a href="https://mahimai.ca">Mahimai</a></span><span>2026-10-05 &middot; Mahimai Raja J</span></footer>
+</article>
+</body>
+</html>
