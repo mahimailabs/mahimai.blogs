@@ -2,7 +2,7 @@
 title: 'GPT-Live with LiveKit: Beyond the First Working Call'
 description: 'Build a GPT-Live sales demo with LiveKit: separate voice and tool prompts, handle changed requests, guard simulated bookings, and measure both usage streams.'
 pubDate: 2026-10-05
-updatedDate: 2026-10-05
+updatedDate: 2026-10-06
 author: 'Mahimai Raja J'
 tags: ['gpt-live', 'livekit', 'voice-ai', 'tool-calling']
 cover: ./covers/gpt-live-livekit.webp
@@ -13,11 +13,14 @@ draft: false
 
 import { Image } from 'astro:assets';
 import coverImage from './covers/gpt-live-livekit.webp';
-import architecture from './figures/gpt-live/architecture.svg';
-import correction from './figures/gpt-live/correction.svg';
+import ReladrawFigure from '@/components/blog/ReladrawFigure.astro';
+import architecture from './figures/gpt-live/architecture.svg?raw';
+import architectureNarrow from './figures/gpt-live/architecture-narrow.svg?raw';
+import correction from './figures/gpt-live/correction.svg?raw';
+import correctionNarrow from './figures/gpt-live/correction-narrow.svg?raw';
 import smokeEvidence from './figures/gpt-live/smoke.json?url';
 
-<Image src={coverImage} alt="A visitor speaks to a voice agent while a separate tool system checks a calendar." widths={[480, 800, 1200, 1672]} sizes="(min-width: 1280px) 784px, (min-width: 1024px) 55vw, (min-width: 832px) 792px, calc(100vw - 40px)" loading="eager" fetchpriority="high" class="article-cover" />
+<Image src={coverImage} alt="A visitor speaks to a voice agent while a separate tool system checks a calendar." widths={[480, 800, 1200, 1774]} sizes="(min-width: 1280px) 784px, (min-width: 1024px) 55vw, (min-width: 832px) 792px, calc(100vw - 40px)" loading="eager" fetchpriority="high" class="article-cover" />
 
 
 Build voice agents that handle interruptions, changing requests, and tools using GPT-Live’s thinking, commentary, and instruction controls.
@@ -66,19 +69,13 @@ That is deliberately conservative. “Thanks” can invalidate the pending looku
 
 The boundary matters: this check observes transcript events, not the caller's intentions directly. If speech recognition misses “Monday,” the revision logic cannot recover a correction it never received. The [WebRTC walkthrough](/blog/how-your-voice-travels-through-webrtc) follows the audio path that precedes this application decision.
 
-<figure class="article-illustration">
-  <img src={correction.src} alt="A newer Monday transcript invalidates Friday's lookup. A fresh lookup and confirmation precede the simulated booking." loading="lazy" width={correction.width} height={correction.height} />
-  <figcaption>A new caller turn invalidates work that began before it. This guard depends on receiving the transcript.</figcaption>
-</figure>
+<ReladrawFigure id="gpt-live-correction" wide={correction} narrow={correctionNarrow} alt="A newer Monday transcript invalidates Friday's lookup. A fresh lookup and confirmation precede the simulated booking." caption="A new caller turn invalidates work that began before it. This guard depends on receiving the transcript." />
 
 ## How It Works
 
 GPT-Live handles a conversation while delegated work runs. In the demo, a Responses backend selects tools and the LiveKit worker executes the Python functions. The application owns the booking state. These are separate responsibilities in [OpenAI's GPT-Live architecture](https://developers.openai.com/api/docs/guides/live).
 
-<figure class="article-illustration">
-  <img src={architecture.src} alt="LiveKit carries visitor audio to GPT-Live. A Responses backend delegates tool calls to the Python worker, which guards calendar state." loading="lazy" width={architecture.width} height={architecture.height} />
-  <figcaption>Conversation, tool selection, and booking permission have different owners.</figcaption>
-</figure>
+<ReladrawFigure id="gpt-live-architecture" wide={architecture} narrow={architectureNarrow} alt="LiveKit carries visitor audio to GPT-Live. A Responses backend delegates tool calls to the Python worker, which guards calendar state." caption="Conversation, tool selection, and booking permission have different owners." />
 
 LiveKit exposes `GPTLiveModel` through an adapter that fits `AgentSession`. This excerpt shows the demo's session configuration; its prompts and assistant class are defined elsewhere in the example:
 

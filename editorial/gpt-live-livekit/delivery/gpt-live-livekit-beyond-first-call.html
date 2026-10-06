@@ -103,17 +103,11 @@ if revision != self.revision or turn != self.user_turn:
 <p>This proves an update occurred after the transcript. It cannot prove the backend interpreted that transcript correctly. That semantic boundary still needs conversation tests.</p>
 <p>That is deliberately conservative. “Thanks” can invalidate the pending lookup too. For this small demo, doing another lookup is preferable to guessing whether a new utterance changes the appointment.</p>
 <p>The boundary matters: this check observes transcript events, not the caller's intentions directly. If speech recognition misses “Monday,” the revision logic cannot recover a correction it never received. The <a href="https://mahimai.ca/blog/how-your-voice-travels-through-webrtc">WebRTC walkthrough</a> follows the audio path that precedes this application decision.</p>
-<figure class="article-illustration">
-  <img src="correction.svg" alt="A newer Monday transcript invalidates Friday&#x27;s lookup. A fresh lookup and confirmation precede the simulated booking." loading="lazy">
-  <figcaption>A new caller turn invalidates work that began before it. This guard depends on receiving the transcript.</figcaption>
-</figure>
+<figure><img src="correction.svg" alt="A newer Monday transcript invalidates Friday&#x27;s lookup. A fresh lookup and confirmation precede the simulated booking."><figcaption>A new caller turn invalidates work that began before it. This guard depends on receiving the transcript.</figcaption></figure>
 
 <h2>How It Works</h2>
 <p>GPT-Live handles a conversation while delegated work runs. In the demo, a Responses backend selects tools and the LiveKit worker executes the Python functions. The application owns the booking state. These are separate responsibilities in <a href="https://developers.openai.com/api/docs/guides/live">OpenAI's GPT-Live architecture</a>.</p>
-<figure class="article-illustration">
-  <img src="architecture.svg" alt="LiveKit carries visitor audio to GPT-Live. A Responses backend delegates tool calls to the Python worker, which guards calendar state." loading="lazy">
-  <figcaption>Conversation, tool selection, and booking permission have different owners.</figcaption>
-</figure>
+<figure><img src="architecture.svg" alt="LiveKit carries visitor audio to GPT-Live. A Responses backend delegates tool calls to the Python worker, which guards calendar state."><figcaption>Conversation, tool selection, and booking permission have different owners.</figcaption></figure>
 
 <p>LiveKit exposes <code>GPTLiveModel</code> through an adapter that fits <code>AgentSession</code>. This excerpt shows the demo's session configuration; its prompts and assistant class are defined elsewhere in the example:</p>
 <pre><code class="language-python">session = AgentSession(

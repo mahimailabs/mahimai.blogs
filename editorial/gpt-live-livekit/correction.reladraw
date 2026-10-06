@@ -1,18 +1,18 @@
-diagram theme: light
+diagram theme: dark
 default edge line: (path: square, corners: rounded)
-style stale fill: #fff1df border: #b57933
-style current fill: #eee6f7 border: #7243ad
-node friday "Friday request / revision 1"
-node lookup "Lookup starts / captures revision / and caller turn" right of friday
-node correction "Caller says Monday / final transcript arrives" below lookup style: current
-node reject "Old lookup rejected / newer caller turn" left of correction style: stale
-node monday "Latest request saved / revision 2" below correction style: current
-node fresh "New lookup / proposes Monday" left of monday style: current
-node confirm "Fresh confirmation / then guarded booking" below fresh style: current
+style dim text: (color: theme-muted)
+style active fill: theme-primary-subtle border: theme-primary line: theme-primary
+style stale fill: theme-fill border: theme-border line: theme-muted text: (color: theme-muted)
+node friday "01  Friday request / [dim]revision 1[/dim]" badge: laptop
+node lookup "02  Lookup begins / [dim]captures turn + revision[/dim]" right of friday badge: database
+node change "03  Monday correction / [dim]new final transcript[/dim]" below friday badge: laptop style: active
+node reject "Old result rejected / [dim]caller turn changed[/dim]" right of change style: stale
+node monday "04  Update request / [dim]save Monday · revision 2[/dim]" below change badge: package style: active
+node offer "05  Fresh lookup / [dim]propose Monday slot[/dim]" right of monday badge: database style: active
+node confirm "06  Caller confirms / [dim]then guarded booking[/dim]" below offer badge: package style: active
 edge friday -> lookup
-edge lookup -> correction
-edge correction -> reject
-edge correction -> monday
-edge monday -> fresh
-edge fresh -> confirm
-node boundary "Transcript arrival is the guard's boundary. / Missed speech cannot invalidate an old request." (wrap: 48) shape: none right of confirm
+edge lookup -> change from: bottom to: top
+edge change -> reject "discard" style: stale line: (pattern: dashed)
+edge change -> monday style: active
+edge monday -> offer style: active
+edge offer -> confirm style: active

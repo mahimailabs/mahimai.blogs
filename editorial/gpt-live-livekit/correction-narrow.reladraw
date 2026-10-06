@@ -1,0 +1,18 @@
+diagram theme: dark
+default edge line: (path: square, corners: rounded)
+style dim text: (color: theme-muted)
+style active fill: theme-primary-subtle border: theme-primary line: theme-primary
+style stale fill: theme-fill border: theme-border line: theme-muted text: (color: theme-muted)
+node friday "01  Friday request / [dim]revision 1[/dim]" badge: laptop
+node lookup "02  Lookup begins / [dim]captures turn + revision[/dim]" below friday badge: database
+node change "03  Monday correction / [dim]new final transcript[/dim]" below lookup badge: laptop style: active
+node reject "Old result rejected / [dim]caller turn changed[/dim]" below change style: stale
+node monday "04  Update request / [dim]save Monday · revision 2[/dim]" below reject badge: package style: active
+node offer "05  Fresh lookup / [dim]propose Monday slot[/dim]" below monday badge: database style: active
+node confirm "06  Caller confirms / [dim]then guarded booking[/dim]" below offer badge: package style: active
+edge friday -> lookup
+edge lookup -> change
+edge change -> reject "discard" style: stale line: (pattern: dashed)
+edge reject -> monday "use latest request"
+edge monday -> offer style: active
+edge offer -> confirm style: active

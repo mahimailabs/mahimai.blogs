@@ -1,40 +1,84 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="671" height="531" viewBox="0 0 671 531" font-family="'DejaVu Sans Mono', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace" font-size="14px">
+<svg xmlns="http://www.w3.org/2000/svg" width="667" height="512" viewBox="0 0 667 512" font-family="'DejaVu Sans Mono', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace" font-size="14px">
   <defs>
-    <marker id="rcd114c58-arrow-7c83a0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c83a0"/>
+    <marker id="arrow-5c5c7c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5c5c7c"/>
+    </marker>
+    <marker id="arrow-5c5c7c-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5c5c7c"/>
+    </marker>
+    <marker id="arrow-8b8b8b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b8b8b"/>
+    </marker>
+    <marker id="arrow-8b8b8b-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b8b8b"/>
+    </marker>
+    <marker id="arrow-486544" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#486544"/>
+    </marker>
+    <marker id="arrow-486544-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#486544"/>
     </marker>
   </defs>
-  <rect x="0" y="0" width="671" height="531" fill="#ffffff"/>
-  <path d="M119.5 49.5 H249.5 a8 8 0 0 1 8 8 V107.5 a8 8 0 0 1 -8 8 H119.5 a8 8 0 0 1 -8 -8 V57.5 a8 8 0 0 1 8 -8 Z" fill="#eef0f7" stroke="#8a90a8"/>
-  <text x="184.5" y="77.9" fill="#1f2328" text-anchor="middle">Friday request</text>
-  <text x="184.5" y="96.9" fill="#1f2328" text-anchor="middle">revision 1</text>
-  <path d="M321.5 40 H476.5 a8 8 0 0 1 8 8 V117 a8 8 0 0 1 -8 8 H321.5 a8 8 0 0 1 -8 -8 V48 a8 8 0 0 1 8 -8 Z" fill="#eef0f7" stroke="#8a90a8"/>
-  <text x="399" y="68.4" fill="#1f2328" text-anchor="middle">Lookup starts</text>
-  <text x="399" y="87.4" fill="#1f2328" text-anchor="middle">captures revision</text>
-  <text x="399" y="106.4" fill="#1f2328" text-anchor="middle">and caller turn</text>
-  <path d="M292 181 H506 a8 8 0 0 1 8 8 V239 a8 8 0 0 1 -8 8 H292 a8 8 0 0 1 -8 -8 V189 a8 8 0 0 1 8 -8 Z" fill="#eee6f7" stroke="#7243ad"/>
-  <text x="399" y="209.4" fill="#1f2328" text-anchor="middle">Caller says Monday</text>
-  <text x="399" y="228.4" fill="#1f2328" text-anchor="middle">final transcript arrives</text>
-  <path d="M48 181 H220 a8 8 0 0 1 8 8 V239 a8 8 0 0 1 -8 8 H48 a8 8 0 0 1 -8 -8 V189 a8 8 0 0 1 8 -8 Z" fill="#fff1df" stroke="#b57933"/>
-  <text x="134" y="209.4" fill="#1f2328" text-anchor="middle">Old lookup rejected</text>
-  <text x="134" y="228.4" fill="#1f2328" text-anchor="middle">newer caller turn</text>
-  <path d="M309 303 H489 a8 8 0 0 1 8 8 V361 a8 8 0 0 1 -8 8 H309 a8 8 0 0 1 -8 -8 V311 a8 8 0 0 1 8 -8 Z" fill="#eee6f7" stroke="#7243ad"/>
-  <text x="399" y="331.4" fill="#1f2328" text-anchor="middle">Latest request saved</text>
-  <text x="399" y="350.4" fill="#1f2328" text-anchor="middle">revision 2</text>
-  <path d="M69 303 H207 a8 8 0 0 1 8 8 V361 a8 8 0 0 1 -8 8 H69 a8 8 0 0 1 -8 -8 V311 a8 8 0 0 1 8 -8 Z" fill="#eee6f7" stroke="#7243ad"/>
-  <text x="138" y="331.4" fill="#1f2328" text-anchor="middle">New lookup</text>
-  <text x="138" y="350.4" fill="#1f2328" text-anchor="middle">proposes Monday</text>
-  <path d="M48 425 H228 a8 8 0 0 1 8 8 V483 a8 8 0 0 1 -8 8 H48 a8 8 0 0 1 -8 -8 V433 a8 8 0 0 1 8 -8 Z" fill="#eee6f7" stroke="#7243ad"/>
-  <text x="138" y="453.4" fill="#1f2328" text-anchor="middle">Fresh confirmation</text>
-  <text x="138" y="472.4" fill="#1f2328" text-anchor="middle">then guarded booking</text>
-  <g font-size="12px">
-  <text x="292" y="454.2" fill="#1f2328" text-anchor="start">Transcript arrival is the guard's boundary.</text>
-  <text x="292" y="470.2" fill="#1f2328" text-anchor="start">Missed speech cannot invalidate an old request.</text>
+  <rect x="0" y="0" width="667" height="512" fill="#111111"/>
+  <path d="M73 40 H285 a8 8 0 0 1 8 8 V98 a8 8 0 0 1 -8 8 H73 a8 8 0 0 1 -8 -8 V48 a8 8 0 0 1 8 -8 Z" fill="#191920" stroke="#25242f"/>
+  <text x="155" y="68.4" fill="#d9d9d9" text-anchor="middle">01  Friday request</text>
+  <text x="155" y="87.4" fill="#8b8b8b" text-anchor="middle">revision 1</text>
+  <g transform="translate(241 54) scale(1.58333)">
+    <path d="M4 3.6 h16 v11.4 h-16 Z" fill="#111111" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M2.2 16 h19.6 l1.6 2.6 a0.7 0.7 0 0 1 -0.6 1.1 h-21.6 a0.7 0.7 0 0 1 -0.6 -1.1 Z" fill="#8d8d8e"/>
+    <path d="M9.6 17.2 h4.8 v1 h-4.8 Z" fill="#3e3d58"/>
   </g>
-  <path d="M 257.5 82.5 L 313.5 82.5" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#rcd114c58-arrow-7c83a0)"/>
-  <path d="M 399 125 L 399 181" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#rcd114c58-arrow-7c83a0)"/>
-  <path d="M 284 214 L 228 214" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#rcd114c58-arrow-7c83a0)"/>
-  <path d="M 399 247 L 399 303" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#rcd114c58-arrow-7c83a0)"/>
-  <path d="M 301 336 L 215 336" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#rcd114c58-arrow-7c83a0)"/>
-  <path d="M 138 369 L 138 425" fill="none" stroke="#7c83a0" stroke-width="1.6" marker-end="url(#rcd114c58-arrow-7c83a0)"/>
+  <path d="M357 40 H619 a8 8 0 0 1 8 8 V98 a8 8 0 0 1 -8 8 H357 a8 8 0 0 1 -8 -8 V48 a8 8 0 0 1 8 -8 Z" fill="#191920" stroke="#25242f"/>
+  <text x="464" y="68.4" fill="#d9d9d9" text-anchor="middle">02  Lookup begins</text>
+  <text x="464" y="87.4" fill="#8b8b8b" text-anchor="middle">captures turn + revision</text>
+  <g transform="translate(575 54) scale(1.58333)">
+    <path d="M3 6.4 v11.2 a9 3.4 0 0 0 18 0 v-11.2 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3 6.4 a9 3.4 0 0 1 18 0 a9 3.4 0 0 1 -18 0 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3 11 a9 3.4 0 0 0 18 0" fill="none" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3 15.6 a9 3.4 0 0 0 18 0" fill="none" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <path d="M60.5 162 H297.5 a8 8 0 0 1 8 8 V220 a8 8 0 0 1 -8 8 H60.5 a8 8 0 0 1 -8 -8 V170 a8 8 0 0 1 8 -8 Z" fill="#142814" stroke="#486544"/>
+  <text x="155" y="190.4" fill="#d9d9d9" text-anchor="middle">03  Monday correction</text>
+  <text x="155" y="209.4" fill="#8b8b8b" text-anchor="middle">new final transcript</text>
+  <g transform="translate(253.5 176) scale(1.58333)">
+    <path d="M4 3.6 h16 v11.4 h-16 Z" fill="#111111" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M2.2 16 h19.6 l1.6 2.6 a0.7 0.7 0 0 1 -0.6 1.1 h-21.6 a0.7 0.7 0 0 1 -0.6 -1.1 Z" fill="#8d8d8e"/>
+    <path d="M9.6 17.2 h4.8 v1 h-4.8 Z" fill="#3e3d58"/>
+  </g>
+  <path d="M444.9 162 H616.9 a8 8 0 0 1 8 8 V220 a8 8 0 0 1 -8 8 H444.9 a8 8 0 0 1 -8 -8 V170 a8 8 0 0 1 8 -8 Z" fill="#191728" stroke="#4f5367"/>
+  <text x="530.9" y="190.4" fill="#8b8b8b" text-anchor="middle">Old result rejected</text>
+  <text x="530.9" y="209.4" fill="#8b8b8b" text-anchor="middle">caller turn changed</text>
+  <path d="M48 284 H310 a8 8 0 0 1 8 8 V342 a8 8 0 0 1 -8 8 H48 a8 8 0 0 1 -8 -8 V292 a8 8 0 0 1 8 -8 Z" fill="#142814" stroke="#486544"/>
+  <text x="155" y="312.4" fill="#d9d9d9" text-anchor="middle">04  Update request</text>
+  <text x="155" y="331.4" fill="#8b8b8b" text-anchor="middle">save Monday · revision 2</text>
+  <g transform="translate(266 298) scale(1.58333)">
+    <path d="M12 2.6 L22 7.4 L12 12.2 L2 7.4 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M2 7.4 L12 12.2 L12 21 L2 16.2 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M22 7.4 L12 12.2 L12 21 L22 16.2 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <path d="M382 284 H602 a8 8 0 0 1 8 8 V342 a8 8 0 0 1 -8 8 H382 a8 8 0 0 1 -8 -8 V292 a8 8 0 0 1 8 -8 Z" fill="#142814" stroke="#486544"/>
+  <text x="468" y="312.4" fill="#d9d9d9" text-anchor="middle">05  Fresh lookup</text>
+  <text x="468" y="331.4" fill="#8b8b8b" text-anchor="middle">propose Monday slot</text>
+  <g transform="translate(558 298) scale(1.58333)">
+    <path d="M3 6.4 v11.2 a9 3.4 0 0 0 18 0 v-11.2 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3 6.4 a9 3.4 0 0 1 18 0 a9 3.4 0 0 1 -18 0 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3 11 a9 3.4 0 0 0 18 0" fill="none" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3 15.6 a9 3.4 0 0 0 18 0" fill="none" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <path d="M378 406 H606 a8 8 0 0 1 8 8 V464 a8 8 0 0 1 -8 8 H378 a8 8 0 0 1 -8 -8 V414 a8 8 0 0 1 8 -8 Z" fill="#142814" stroke="#486544"/>
+  <text x="468" y="434.4" fill="#d9d9d9" text-anchor="middle">06  Caller confirms</text>
+  <text x="468" y="453.4" fill="#8b8b8b" text-anchor="middle">then guarded booking</text>
+  <g transform="translate(562 420) scale(1.58333)">
+    <path d="M12 2.6 L22 7.4 L12 12.2 L2 7.4 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M2 7.4 L12 12.2 L12 21 L2 16.2 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M22 7.4 L12 12.2 L12 21 L22 16.2 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <path d="M 293 73 L 349 73" fill="none" stroke="#5c5c7c" stroke-width="1.6" marker-end="url(#arrow-5c5c7c)"/>
+  <path d="M 488 106 L 488 117.2 C 488 126.48, 480.48 134, 471.2 134 L 195.8 134 C 186.52 134, 179 141.52, 179 150.8 L 179 162" fill="none" stroke="#5c5c7c" stroke-width="1.6" marker-end="url(#arrow-5c5c7c)"/>
+  <path d="M 305.5 195 L 436.9 195" fill="none" stroke="#8b8b8b" stroke-width="1.6" stroke-dasharray="6.4 4.8" marker-end="url(#arrow-8b8b8b)"/>
+  <rect x="336.7" y="185.5" width="69" height="19" fill="#111111"/>
+  <text x="371.2" y="199.9" fill="#8b8b8b" text-anchor="middle">discard</text>
+  <path d="M 179 228 L 179 284" fill="none" stroke="#486544" stroke-width="1.6" marker-end="url(#arrow-486544)"/>
+  <path d="M 318 317 L 374 317" fill="none" stroke="#486544" stroke-width="1.6" marker-end="url(#arrow-486544)"/>
+  <path d="M 492 350 L 492 406" fill="none" stroke="#486544" stroke-width="1.6" marker-end="url(#arrow-486544)"/>
 </svg>

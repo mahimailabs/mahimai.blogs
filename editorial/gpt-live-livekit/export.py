@@ -11,6 +11,7 @@ _, frontmatter, body = source.read_text().split('---', 2)
 frontmatter += f'\ndate: 2026-10-05\nslug: {slug}\ncanonical: https://mahimai.ca/blog/{slug}\nsite_name: Mahimai\nog_image_alt: A visitor speaks to a voice agent while a separate tool system checks a calendar.\n'
 body = re.sub(r'^import .*?;\n', '', body, flags=re.M)
 body = re.sub(r'<Image .*?/>', '', body)
+body = re.sub(r'<ReladrawFigure id="[^"]+" wide={(\w+)} narrow={\w+} alt="([^"]+)" caption="([^"]+)" />', lambda m: f'<figure><img src="{m[1]}.svg" alt="{m[2]}" /><figcaption>{m[3]}</figcaption></figure>', body)
 for name in ('architecture', 'correction'):
     body = body.replace('src={' + name + '.src}', f'src="{name}.svg"')
     body = body.replace('width={' + name + '.width}', '')

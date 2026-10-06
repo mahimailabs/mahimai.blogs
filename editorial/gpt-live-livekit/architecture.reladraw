@@ -1,16 +1,16 @@
-diagram theme: light
+diagram theme: dark
 default edge line: (path: square, corners: rounded)
-style voice fill: #eee6f7 border: #7243ad
-style app fill: #f5f5f5 border: #777777
-node caller "Visitor / speaks and listens"
-node livekit "LiveKit / audio transport" right of caller
-node frontend "GPT-Live / voice conversation" right of livekit style: voice
-node backend "Responses model / selects tools" below frontend style: voice
-node worker "Python worker / validates request / executes tools" left of backend style: app
-node state "Simulated calendar / current revision / confirmed booking" left of worker style: app
-edge caller <-> livekit "audio"
-edge livekit <-> frontend "audio"
-edge frontend <-> backend "delegation and results"
-edge backend <-> worker "tool calls and results"
-edge worker <-> state "guarded actions"
-node rule "The voice model talks. The backend chooses tools. / Application code decides whether a booking is allowed." (wrap: 66) shape: none below worker
+style dim text: (color: theme-muted)
+style active fill: theme-primary-subtle border: theme-primary line: theme-primary
+style stale fill: theme-fill border: theme-border line: theme-muted text: (color: theme-muted)
+node caller "Visitor / [dim]speaks and listens[/dim]" icon: laptop
+node transport "LiveKit / [dim]audio transport[/dim]" right of caller badge: cubes
+node voice "GPT-Live / [dim]voice conversation[/dim]" below transport badge: cube style: active
+node backend "Responses model / [dim]selects tools[/dim]" below caller badge: cubes style: active
+node worker "Python worker / [dim]validates and executes[/dim]" below backend badge: package
+node calendar "Calendar state / [dim]simulated booking[/dim]" below voice badge: database
+edge caller <-> transport "audio"
+edge transport <-> voice "audio" style: active
+edge voice <-> backend "delegation" style: active
+edge backend <-> worker "tools + results"
+edge worker <-> calendar "validated"

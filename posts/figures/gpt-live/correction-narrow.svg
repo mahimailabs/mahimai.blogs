@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="358" height="929" viewBox="0 0 358 929" font-family="'DejaVu Sans Mono', 'Menlo', 'Consolas', 'Liberation Mono', 'Courier New', monospace" font-size="14px">
+  <defs>
+    <marker id="arrow-5c5c7c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5c5c7c"/>
+    </marker>
+    <marker id="arrow-5c5c7c-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5c5c7c"/>
+    </marker>
+    <marker id="arrow-8b8b8b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b8b8b"/>
+    </marker>
+    <marker id="arrow-8b8b8b-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b8b8b"/>
+    </marker>
+    <marker id="arrow-486544" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#486544"/>
+    </marker>
+    <marker id="arrow-486544-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#486544"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="358" height="929" fill="#111111"/>
+  <path d="M73 40 H285 a8 8 0 0 1 8 8 V98 a8 8 0 0 1 -8 8 H73 a8 8 0 0 1 -8 -8 V48 a8 8 0 0 1 8 -8 Z" fill="#191920" stroke="#25242f"/>
+  <text x="155" y="68.4" fill="#d9d9d9" text-anchor="middle">01  Friday request</text>
+  <text x="155" y="87.4" fill="#8b8b8b" text-anchor="middle">revision 1</text>
+  <g transform="translate(241 54) scale(1.58333)">
+    <path d="M4 3.6 h16 v11.4 h-16 Z" fill="#111111" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M2.2 16 h19.6 l1.6 2.6 a0.7 0.7 0 0 1 -0.6 1.1 h-21.6 a0.7 0.7 0 0 1 -0.6 -1.1 Z" fill="#8d8d8e"/>
+    <path d="M9.6 17.2 h4.8 v1 h-4.8 Z" fill="#3e3d58"/>
+  </g>
+  <path d="M48 162 H310 a8 8 0 0 1 8 8 V220 a8 8 0 0 1 -8 8 H48 a8 8 0 0 1 -8 -8 V170 a8 8 0 0 1 8 -8 Z" fill="#191920" stroke="#25242f"/>
+  <text x="155" y="190.4" fill="#d9d9d9" text-anchor="middle">02  Lookup begins</text>
+  <text x="155" y="209.4" fill="#8b8b8b" text-anchor="middle">captures turn + revision</text>
+  <g transform="translate(266 176) scale(1.58333)">
+    <path d="M3 6.4 v11.2 a9 3.4 0 0 0 18 0 v-11.2 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3 6.4 a9 3.4 0 0 1 18 0 a9 3.4 0 0 1 -18 0 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3 11 a9 3.4 0 0 0 18 0" fill="none" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3 15.6 a9 3.4 0 0 0 18 0" fill="none" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <path d="M60.5 284 H297.5 a8 8 0 0 1 8 8 V342 a8 8 0 0 1 -8 8 H60.5 a8 8 0 0 1 -8 -8 V292 a8 8 0 0 1 8 -8 Z" fill="#142814" stroke="#486544"/>
+  <text x="155" y="312.4" fill="#d9d9d9" text-anchor="middle">03  Monday correction</text>
+  <text x="155" y="331.4" fill="#8b8b8b" text-anchor="middle">new final transcript</text>
+  <g transform="translate(253.5 298) scale(1.58333)">
+    <path d="M4 3.6 h16 v11.4 h-16 Z" fill="#111111" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M2.2 16 h19.6 l1.6 2.6 a0.7 0.7 0 0 1 -0.6 1.1 h-21.6 a0.7 0.7 0 0 1 -0.6 -1.1 Z" fill="#8d8d8e"/>
+    <path d="M9.6 17.2 h4.8 v1 h-4.8 Z" fill="#3e3d58"/>
+  </g>
+  <path d="M93 431.4 H265 a8 8 0 0 1 8 8 V489.4 a8 8 0 0 1 -8 8 H93 a8 8 0 0 1 -8 -8 V439.4 a8 8 0 0 1 8 -8 Z" fill="#191728" stroke="#4f5367"/>
+  <text x="179" y="459.8" fill="#8b8b8b" text-anchor="middle">Old result rejected</text>
+  <text x="179" y="478.8" fill="#8b8b8b" text-anchor="middle">caller turn changed</text>
+  <path d="M48 578.8 H310 a8 8 0 0 1 8 8 V636.8 a8 8 0 0 1 -8 8 H48 a8 8 0 0 1 -8 -8 V586.8 a8 8 0 0 1 8 -8 Z" fill="#142814" stroke="#486544"/>
+  <text x="155" y="607.2" fill="#d9d9d9" text-anchor="middle">04  Update request</text>
+  <text x="155" y="626.2" fill="#8b8b8b" text-anchor="middle">save Monday · revision 2</text>
+  <g transform="translate(266 592.8) scale(1.58333)">
+    <path d="M12 2.6 L22 7.4 L12 12.2 L2 7.4 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M2 7.4 L12 12.2 L12 21 L2 16.2 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M22 7.4 L12 12.2 L12 21 L22 16.2 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <path d="M69 700.8 H289 a8 8 0 0 1 8 8 V758.8 a8 8 0 0 1 -8 8 H69 a8 8 0 0 1 -8 -8 V708.8 a8 8 0 0 1 8 -8 Z" fill="#142814" stroke="#486544"/>
+  <text x="155" y="729.2" fill="#d9d9d9" text-anchor="middle">05  Fresh lookup</text>
+  <text x="155" y="748.2" fill="#8b8b8b" text-anchor="middle">propose Monday slot</text>
+  <g transform="translate(245 714.8) scale(1.58333)">
+    <path d="M3 6.4 v11.2 a9 3.4 0 0 0 18 0 v-11.2 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3 6.4 a9 3.4 0 0 1 18 0 a9 3.4 0 0 1 -18 0 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3 11 a9 3.4 0 0 0 18 0" fill="none" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M3 15.6 a9 3.4 0 0 0 18 0" fill="none" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <path d="M65 822.8 H293 a8 8 0 0 1 8 8 V880.8 a8 8 0 0 1 -8 8 H65 a8 8 0 0 1 -8 -8 V830.8 a8 8 0 0 1 8 -8 Z" fill="#142814" stroke="#486544"/>
+  <text x="155" y="851.2" fill="#d9d9d9" text-anchor="middle">06  Caller confirms</text>
+  <text x="155" y="870.2" fill="#8b8b8b" text-anchor="middle">then guarded booking</text>
+  <g transform="translate(249 836.8) scale(1.58333)">
+    <path d="M12 2.6 L22 7.4 L12 12.2 L2 7.4 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M2 7.4 L12 12.2 L12 21 L2 16.2 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+    <path d="M22 7.4 L12 12.2 L12 21 L22 16.2 Z" fill="#3e3d58" stroke="#8d8d8e" stroke-width="1.1" stroke-linejoin="round"/>
+  </g>
+  <path d="M 179 106 L 179 162" fill="none" stroke="#5c5c7c" stroke-width="1.6" marker-end="url(#arrow-5c5c7c)"/>
+  <path d="M 179 228 L 179 284" fill="none" stroke="#5c5c7c" stroke-width="1.6" marker-end="url(#arrow-5c5c7c)"/>
+  <path d="M 179 350 L 179 431.4" fill="none" stroke="#8b8b8b" stroke-width="1.6" stroke-dasharray="6.4 4.8" marker-end="url(#arrow-8b8b8b)"/>
+  <rect x="144.5" y="381.2" width="69" height="19" fill="#111111"/>
+  <text x="179" y="395.6" fill="#8b8b8b" text-anchor="middle">discard</text>
+  <path d="M 179 497.4 L 179 578.8" fill="none" stroke="#5c5c7c" stroke-width="1.6" marker-end="url(#arrow-5c5c7c)"/>
+  <rect x="98" y="528.6" width="162" height="19" fill="#111111"/>
+  <text x="179" y="543" fill="#d9d9d9" text-anchor="middle">use latest request</text>
+  <path d="M 179 644.8 L 179 700.8" fill="none" stroke="#486544" stroke-width="1.6" marker-end="url(#arrow-486544)"/>
+  <path d="M 179 766.8 L 179 822.8" fill="none" stroke="#486544" stroke-width="1.6" marker-end="url(#arrow-486544)"/>
+</svg>
