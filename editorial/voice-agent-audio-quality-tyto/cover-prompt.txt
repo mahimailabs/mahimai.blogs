@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/roadside-dispatch.webp in mahimai.ca, which currently holds a flat placeholder.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream tones, muted lavender accents, gentle late-afternoon light.
+
+Subject: a silver hatchback stopped on a highway shoulder beside a guard rail, hazard lights glowing amber, a red warning triangle on the asphalt behind it. In the foreground, resting on the car's roof or a guard-rail post, a smartphone on speaker whose screen shows only abstract signal bars, two lit in lavender and two dim. A faint suggestion of motion blur from passing traffic in the far lane.
+
+Composition: car in the lower middle third, open soft sky above for overlay, eye-level, shallow depth of field on the phone. Calm rather than dramatic. No people, no text, no logos, no license plate characters, no UI text.

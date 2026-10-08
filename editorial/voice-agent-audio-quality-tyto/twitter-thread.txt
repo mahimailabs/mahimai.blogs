@@ -1,0 +1,14 @@
+1/ Your voice agent never hears the phone line. It hears a transcript that looks equally confident from a quiet kitchen or a highway shoulder. Here is how we make an agent know when it cannot hear you.
+
+2/ Score the caller's raw audio on the side. We tap the LiveKit track with a second AudioStream and run ai-coustics Tyto on a rolling 5 s window, once a second, in a thread. The STT path is untouched, so a slow scorer never adds latency.
+
+3/ Smooth before you act. EMA on the risk score, plus two consecutive bad windows before any intervention. One door slam should not make your agent apologise for the line.
+
+4/ Name the cause out loud. "I can hear a radio, could you turn it down?" gets the radio turned off. "I can't hear you" gets shouting. Each degradation gets its own line and its own fix.
+
+5/ Gate the fields, not the call. Every capture tool stamps the value with the line state. On a bad line the tool returns a read-back sentence instead of "got it", and dispatch refuses unconfirmed fields.
+
+6/ Calibrate the thresholds on your own calls. Published bands are a starting point. Log the score next to every corrected field and move the line until read-backs catch real errors.
+
+7/ Try it live with music playing, and read the full walkthrough with code:
+https://mahimai.ca/blog/voice-agent-audio-quality-tyto
