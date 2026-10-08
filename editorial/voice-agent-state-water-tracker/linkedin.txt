@@ -1,0 +1,19 @@
+"Two glasses. Actually, make that one."
+
+That sentence breaks more voice agents than accents do.
+
+If the model holds the running total, every correction is arithmetic it has to redo from the transcript. One misheard word anywhere in the history and the count drifts.
+
+The fix is boring and it works:
+→ keep the number in per-call state, not chat history
+→ change it only inside function tools
+→ return the new total from every tool, as a sentence the model can repeat
+→ drive the screen from tool events, never from what the model says
+
+The last one is my favourite. If the screen can only show a number a tool produced, a wrong spoken total becomes a bug you can see in a demo instead of one you find in a support ticket.
+
+We just put the water tracker from awesome-voice-apps in our playground. Log a few glasses, take one back, change the goal, and watch the tool calls on the right.
+
+What is the one number your agent keeps "in its head" today?
+
+https://mahimai.ca/blog/voice-agent-state-water-tracker

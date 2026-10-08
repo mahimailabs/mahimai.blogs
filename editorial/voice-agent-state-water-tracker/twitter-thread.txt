@@ -1,0 +1,16 @@
+1/ "Two glasses. Actually, make that one."
+
+Three state changes in one breath. Most voice agents get it wrong because the model is holding the count. A short thread on who should own state in a voice agent.
+
+2/ An LLM is good at deciding what the caller meant. It is bad at remembering a value across turns. Corrections are relative, STT is lossy, and long calls get trimmed. A total that only lives in chat history drifts.
+
+3/ Rule: the model proposes a change, the tool applies it, and the tool's answer is the truth. In LiveKit Agents that means per-call userdata, read and written only inside function tools through RunContext.
+
+4/ Every write tool returns the new total as a sentence: "Logged 1 glass. Total: 3/8." The model reads it instead of doing arithmetic. Cheapest drift guard there is.
+
+5/ Corrections get their own tool. A set_total(n) tool hands the subtraction back to the model. remove_water(n) keeps every change relative, clamps at zero, and reports what it actually removed.
+
+6/ The screen listens to tools, not speech. Each tool publishes a small event on the LiveKit data channel. If the model says four and the tool said three, the screen shows three. You see the bug in the demo.
+
+7/ Try it live in our playground and read the full walkthrough, code included:
+https://mahimai.ca/blog/voice-agent-state-water-tracker

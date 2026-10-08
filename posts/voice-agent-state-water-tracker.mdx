@@ -1,0 +1,243 @@
+---
+title: 'Voice Agent State: Let the Tool Own the Count'
+description: 'Build a LiveKit voice agent that tracks a running total by voice: tools own the state, the UI listens to tools, and corrections never drift.'
+pubDate: 2026-10-08
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'function-calling', 'agent-state']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** A voice agent that keeps a running number (glasses of water, items in a cart, attendees on a call) should never let the model hold that number. Keep it in per-call application state, change it only inside function tools, return the new total from every tool, and drive the screen from the tool, not from what the model says. You can try the result below and read the 230-line agent that does it.
+
+"Two glasses. Actually, make that one. And bump my goal to ten."
+
+That is three state changes in one breath: an add, a correction, and a change to the target. A person keeping a tally on paper gets this right without thinking. A voice agent gets it right only if you decide, up front, who owns the number. If the answer is "the model, from the conversation", the count drifts the first time someone corrects themselves.
+
+This post walks through the water tracker in [awesome-voice-apps](https://github.com/mahimairaja/awesome-voice-apps/tree/421135071b6279dc18b211a8a03c13d27edc0ece/demos/water-tracker). It is the smallest example in the collection, which is exactly why it is useful: there is nothing in it except the pattern.
+
+## The model is a bad ledger
+
+An LLM is good at deciding *what* the caller meant. It is unreliable at *remembering* a value across turns, for three reasons that all show up in voice:
+
+1. **Corrections are relative.** "Actually one" only means something against the previous value. If the previous value lives in the transcript, the model has to re-derive it every turn, and a misheard word anywhere in the history changes the answer.
+2. **Speech is lossy.** STT can turn "two" into "too" or "to". When that happens inside a tool argument, you see it in a log. When it happens inside the model's private arithmetic, you never see it.
+3. **Context gets trimmed.** Long calls get truncated or summarised. A total held only in chat history disappears with the turn that set it.
+
+So the rule I use on client agents is short: **the model proposes a change, the tool applies it, and the tool's answer is the truth.** Everything else in this post is that rule written down.
+
+## State lives in per-call userdata
+
+LiveKit Agents gives each `AgentSession` a `userdata` object that tools receive through `RunContext`. The water tracker keeps two integers there:
+
+```python
+DEFAULT_GOAL = 8
+
+userdata: dict = {"glasses": 0, "goal": DEFAULT_GOAL}
+session = AgentSession(
+    userdata=userdata,
+    stt=deepgram.STT(model="nova-3"),
+    llm=openai.LLM(model="gpt-4o-mini"),
+    tts=cartesia.TTS(model="sonic-2"),
+    vad=ctx.proc.userdata["vad"],
+    turn_detection=inference.TurnDetector(),
+)
+```
+
+Two details matter more than they look.
+
+First, the dict is created **inside the entrypoint**, once per job. If you ever build it in a module global, or in shared session keyword arguments for a pool of sessions, two callers share one tally. On our hosted playground the worker runs calls as threads in one process, so that mistake would be visible to strangers. The hosted wrapper rebuilds the state in `on_enter` for every call and carries a comment saying never to share it.
+
+Second, the state is plain data. It has no idea it is in a voice agent, which means you can unit test every change without audio, a model, or a network.
+
+## Tools are the only writers
+
+The agent has three tools: `log_water`, `remove_water` and `set_goal`. Here is the add path:
+
+```python
+@function_tool()
+async def log_water(
+    self,
+    context: RunContext[dict],
+    glasses: int = 1,
+) -> str:
+    """Log glasses of water drunk and update the progress tracker.
+
+    Call this whenever the user says they drank water.
+    glasses: number of glasses to add (default 1).
+    """
+    if glasses < 1:
+        return "I can only log one or more glasses; say 'undo' if you miscounted."
+    data = context.userdata
+    data["glasses"] += glasses
+    _publish_stat(self.room, data, data["glasses"], data["goal"])
+    remaining = max(0, data["goal"] - data["glasses"])
+    if data["glasses"] > data["goal"]:
+        return (
+            f"Logged {glasses} glass(es). You're already past your goal at "
+            f"{data['glasses']}/{data['goal']}."
+        )
+    if data["glasses"] == data["goal"]:
+        return f"Logged {glasses} glass(es). Total: {data['glasses']}/{data['goal']}. Goal reached!"
+    return (
+        f"Logged {glasses} glass(es). Total: {data['glasses']}/{data['goal']}. "
+        f"{remaining} more to go."
+    )
+```
+
+Look at what the tool returns. Not "ok", not `None`: the **new total, written as a sentence the model can repeat.** That is the cheapest drift guard there is. The model does not compute "two plus one"; it reads "Total: 3/8" out of the tool result and says it. If the model and the tracker ever disagree, the tool result in the chat history is the tiebreaker, and the next turn starts from it.
+
+The guard clause matters too. A negative or zero `glasses` is how a model sometimes expresses "undo" when it has no undo tool. Rejecting it with a hint ("say 'undo' if you miscounted") nudges the model toward the right tool instead of silently corrupting the count.
+
+## Corrections get their own tool
+
+The tempting shortcut is one `set_total(n)` tool. It looks simpler. It also hands the arithmetic back to the model, which is the thing we are trying to avoid: to set the total after "make that one", the model has to know the previous total and subtract.
+
+A separate `remove_water` keeps every change relative and auditable:
+
+```python
+@function_tool()
+async def remove_water(
+    self,
+    context: RunContext[dict],
+    glasses: int = 1,
+) -> str:
+    """Remove glasses of water logged in error and update the progress tracker.
+
+    Call this when the user wants to undo or correct a miscount.
+    glasses: number of glasses to remove (default 1).
+    """
+    if glasses < 1:
+        return "I can only remove one or more glasses; tell me how many to undo."
+    data = context.userdata
+    if data["glasses"] == 0:
+        return "Nothing to remove yet; you haven't logged any glasses today."
+    removed = min(glasses, data["glasses"])
+    data["glasses"] = max(0, data["glasses"] - glasses)
+    _publish_stat(self.room, data, data["glasses"], data["goal"])
+    remaining = max(0, data["goal"] - data["glasses"])
+    return (
+        f"Removed {removed} glass(es). Total: {data['glasses']}/{data['goal']}. "
+        f"{remaining} more to go."
+    )
+```
+
+It clamps at zero and reports what it actually removed, not what was asked. "Remove five" on a total of two answers "Removed 2", so the model cannot claim an undo that did not happen.
+
+The instructions spell the mapping out in plain words: drank water means `log_water`, undo or a miscount means `remove_water`, a new target means `set_goal`. Tool docstrings carry the same mapping. Saying it twice is not redundancy; the docstring travels with the tool schema, and the instructions shape the model's behaviour between tool calls.
+
+## The screen listens to tools, not to speech
+
+The tracker on the page never parses what the agent says. Each tool calls `_publish_stat`, which sends a small JSON event over the LiveKit data channel:
+
+```python
+def _publish_stat(room: rtc.Room, data: dict, glasses: int, goal: int) -> None:
+    remaining = max(0, goal - glasses)
+    caption = (
+        "Goal reached! Great job." if glasses >= goal else f"{remaining} more to reach your goal."
+    )
+    publish_ui_event(
+        room,
+        "Stat",
+        _ui_action(data, "water"),
+        component_id="water",
+        props={
+            "label": "glasses today",
+            "value": glasses,
+            "of": goal,
+            "caption": caption,
+        },
+    )
+```
+
+`publish_ui_event` wraps `room.local_participant.publish_data(payload, topic="ui", reliable=True)`. Reliable delivery matters here: a dropped "update" would leave the screen one correction behind the agent.
+
+This gives you a property worth designing for: **the screen can only show a number a tool produced.** If the model says "you're at four" when the tool said three, the visitor sees three on screen and hears four. That mismatch is a bug you can see in a demo, instead of one you discover in a support ticket.
+
+On the browser side, treat agent events as untrusted input. The playground accepts the event only from an agent participant, only on the `ui` topic, only under 16 KB, and then checks the shape before rendering:
+
+```ts
+export function readWater(props: unknown, previous: Water | null = null): Water | null {
+  const p = props as { value?: unknown; of?: unknown } | null;
+  const glasses = p?.value;
+  const goal = p?.of;
+  if (
+    !Number.isInteger(glasses) ||
+    !Number.isInteger(goal) ||
+    (glasses as number) < 0 ||
+    (glasses as number) > MAX_GLASSES ||
+    (goal as number) < 1 ||
+    (goal as number) > MAX_GLASSES
+  )
+    return null;
+  // ...diff against the previous event to list the change ("Removed 1 glass")
+}
+```
+
+The panel also diffs consecutive events to show a short list of tool calls: "Logged 3 glasses", "Removed 1 glass", "Goal set to 6". That list is the most honest debugging view of a stateful voice agent I know of, because it shows what the application did, not what the model narrated.
+
+## Try it
+
+Sign in with GitHub and you get a short daily allowance across the playground demos. Say how many glasses you have had, correct yourself mid-sentence, then change the goal. Watch the tool-call list on the right while you talk.
+
+<PlaygroundDemo demo="water" />
+
+Things worth trying, because they are where naive agents break:
+
+- "Two glasses. Actually just one." Expect a log of 2 followed by a removal of 1, or a single log of 1. Both leave the tracker right. A wrong answer here shows up as 3.
+- "Undo everything." The removal clamps at zero.
+- "I drank minus two glasses." The guard returns a hint instead of a negative log.
+- "Set my goal to zero." `set_goal` rejects goals under one.
+
+## What changes when you host it
+
+Running this for anonymous visitors added a wrapper, not a rewrite. The hosted worker loads the contributed `agent.py` by path and mixes it with a guard class shared by every cascaded STT, LLM and TTS demo in the playground:
+
+```python
+class HostedWater(HostedGuard, WaterCoach):
+    demo = "water"
+    greeting = (
+        "Say this is a hydration-tracking simulation and nothing is saved after the call. "
+        f"Tell them the goal is {DEFAULT_GOAL} glasses today and ask how many they have had so far."
+    )
+
+    def initial_state(self) -> dict:
+        return water_state()
+
+    def publish_initial(self) -> None:
+        publish_water(self.room, self.session.userdata)
+```
+
+`HostedGuard` owns everything the contributed demo should not care about: it caps LLM generations, context size and TTS input per call, stops at the server deadline, and reports metered cost back to the site. The demo's tools and state stay untouched. That split is the second lesson of this example: **keep business state in the agent, and keep operational limits in a wrapper**, so the same agent file runs on a laptop console and on a shared worker.
+
+Notice that the wrapper does not change how state works either. `initial_state()` returns a fresh dict per call, and the first `publish_initial()` puts 0 of 8 on screen before the agent speaks, so the visitor sees the tracker exist before they say anything.
+
+## Testing the count
+
+Because state is plain data, the deterministic part is an ordinary unit test. This is adapted from the hosted worker's tests, with the UI publish patched out:
+
+```python
+coach = hosted_water.WaterCoach(SimpleNamespace())
+state = {"glasses": 0, "goal": 8}
+context = SimpleNamespace(userdata=state)
+with patch.object(hosted_water._module, "publish_ui_event") as publish:
+    await coach.log_water(context, 3)
+    await coach.remove_water(context, 1)
+    await coach.set_goal(context, 6)
+assert state == {"glasses": 2, "goal": 6}
+props = publish.call_args.kwargs["props"]
+assert (props["value"], props["of"]) == (2, 6)
+```
+
+No model, no audio, no network, and it checks both the state and what the screen would show. The repository also has an [LLM-judged eval](https://github.com/mahimairaja/awesome-voice-apps/blob/421135071b6279dc18b211a8a03c13d27edc0ece/tests/water-tracker/test_water_tracker.py) that runs a short text conversation through `AgentSession` and asks judges whether the right tools were used. Keep the two separate. The unit test proves the arithmetic; the eval checks that the model picks the right tool for a phrase. Only the second one needs an API key, and only the second one can flake.
+
+## What this means for you
+
+1. **Find every number your agent "remembers".** Cart totals, attendee counts, seat selections, remaining balance. If any of them only exists in chat history, move it into per-call state behind a tool.
+2. **Return the new state from every write tool.** One sentence with the authoritative value. It costs a few tokens and removes a whole class of "the agent said the wrong total" reports.
+3. **Drive your UI from tool events.** If your screen can show something no tool produced, your screen and your agent can disagree, and the visitor will believe the screen.
+
+The [water tracker source](https://github.com/mahimairaja/awesome-voice-apps/tree/421135071b6279dc18b211a8a03c13d27edc0ece/demos/water-tracker) runs with `uv sync` and `uv run python agent.py console` once you add Deepgram, OpenAI, Cartesia and LiveKit keys. The [LiveKit tools documentation](https://docs.livekit.io/agents/logic/tools/definition/) covers `function_tool` and `RunContext` in more depth.
+
+If you are shipping an agent that books, orders or counts anything for real customers, state ownership is one of the first things we check in a [production readiness review](/contact). It is cheap to fix before launch and expensive to debug after.
