@@ -1,0 +1,18 @@
+A voice answer has no footnotes.
+
+That is fine for a coffee order. It is the whole problem for anything near legal, medical or money questions. The caller hears two confident sentences and cannot tell whether they came from your documents or from the model's general idea of the topic.
+
+We just put the tenant rights agent from awesome-voice-apps in our playground. It answers US renter questions from HUD-based guidance, and the interesting part is what it does with the evidence:
+
+→ retrieve on every user turn, before the model runs, not through a tool call
+→ put the section it leaned on beside the call, named and quotable
+→ clear that card the moment a question has no matching passage
+→ build the topic list from the index, so it never advertises what it cannot retrieve
+
+The takeaway I did not expect: swapping embedding models is a behaviour change. Same documents, same questions, and the old similarity floor would have dropped a real fair housing question. Re-measure the floor every time you change models, and write the numbers next to the constant.
+
+Ask it about your deposit, then about something it does not cover, and watch the source appear and disappear.
+
+How does your voice agent show the caller where an answer came from?
+
+https://mahimai.ca/blog/voice-rag-tenant-rights-sources

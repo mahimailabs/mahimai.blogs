@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/tenant-rights.webp in mahimai.ca, which currently holds a flat placeholder drawn to match water-tracker.webp.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light and leaf shadows, pale wooden desk, a sprig of lavender in a small ceramic pot, muted lavender accents.
+
+Subject: a signed lease of two or three pages lying slightly askew, a brass house key beside it, a small open guidance booklet standing on the desk with one line highlighted in lavender, and a matte black desk microphone with a thin lavender ring, like the coffee counter card.
+
+Composition: objects arranged left to right along the desk, generous empty wall above for overlay, eye-level, shallow depth of field. Morning light from the upper right. Calm, trustworthy mood. No people, no text or legible words, no logos, no scales of justice, no gavels, no UI.

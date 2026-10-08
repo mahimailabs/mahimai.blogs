@@ -1,0 +1,14 @@
+1/ A voice answer has no footnotes. A chatbot can paste a link; a voice agent speaks two sentences and the caller cannot tell what they came from. A thread on voice RAG that shows its source and admits a miss.
+
+2/ Retrieve inside on_user_turn_completed, not a lookup tool. One embedding call, then one LLM call. A tool adds a round trip to every grounded answer, and in voice that round trip is audible.
+
+3/ In LiveKit Agents the turn_ctx you add passages to is a copy for that turn. Citations reach the model once and do not pile up in the history.
+
+4/ retrieve() returns a covered flag: best score above the floor. Everything branches on it: what the model is told, and what the screen shows.
+
+5/ The floor belongs to the embedding model. Moving from NVIDIA nv-embedqa to text-embedding-3-small, the old 0.33 would have dropped "They won't rent to me because I have kids" (0.32). Small talk topped out at 0.17.
+
+6/ A stale citation is worse than none. When nothing clears the floor, unmount the source card, or an uncovered answer looks sourced.
+
+7/ Try it in our playground, with the code and the numbers:
+https://mahimai.ca/blog/voice-rag-tenant-rights-sources
