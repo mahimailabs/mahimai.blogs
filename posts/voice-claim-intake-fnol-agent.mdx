@@ -1,0 +1,225 @@
+---
+title: 'FNOL Voice Agent: Validate Every Field in the Tool'
+description: 'Build an insurance claim intake voice agent with LiveKit: tools validate each field, reject with a reason, and refuse to file until the claim is complete.'
+pubDate: 2026-10-08
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'function-calling', 'insurance', 'form-filling']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** A voice agent that fills a form (an insurance claim, an intake sheet, a booking) should validate every answer in code, inside the tool that records it, and hand the model a one-sentence reason when it rejects one. Put the irreversible step behind a tool that refuses until the record is complete and returns the same reference when called twice. Tell the model what day it is. You can file a made-up claim below and read the 300-line agent that does it.
+
+"Policy number? Uh, it's A B one two three, four five six. No wait, that's my old one."
+
+A first notice of loss (FNOL) call is a form read aloud by someone who just had a bad day. They give fields out of order, mumble the policy number, say "last Tuesday" for the date, and answer two questions at once. The agent's job is to turn that into eight clean fields and a claim number, without inventing anything.
+
+Most form-filling voice agents put the rules in the prompt: "policy numbers are two letters and six digits", "dates must not be in the future". The model mostly follows them. Mostly is the problem. This post walks through the [claim intake demo](https://github.com/mahimairaja/awesome-voice-apps/tree/421135071b6279dc18b211a8a03c13d27edc0ece/demos/claim-intake) in awesome-voice-apps, which puts the rules somewhere the model cannot talk its way around.
+
+## Prompt rules are suggestions
+
+A prompt rule is a request to a probabilistic system. Three things go wrong with it in voice specifically:
+
+1. **STT changes the input under the rule.** "AB123456" arrives as "a b 1 2 3 4 5 6", "AB one two three four five six" or "a bee 123456". A prompt rule has to recognise every spelling. A normaliser does it in one line.
+2. **The model wants to be helpful.** Asked for a date in the future, it will often accept it and move on, because pushing back feels rude. Code does not have that instinct.
+3. **You cannot test a prompt rule offline.** You can only sample the model and hope the sample is representative. A validator is a pure function with a unit test.
+
+So the split I use on client intake agents: **the model extracts and converses, the tool validates and stores, and a rejection comes back as a sentence the model can say.**
+
+## One tool, one validator per field
+
+The agent records every answer through a single tool. The field name is a `Literal`, so it is not free text:
+
+```python
+FieldName = Literal[
+    "claimant_name",
+    "policy_number",
+    "date_of_loss",
+    "location",
+    "vehicle",
+    "description",
+    "injuries",
+    "drivable",
+]
+```
+
+LiveKit builds the tool schema from the type hints, and a `Literal` becomes a JSON Schema `enum`. The model cannot record a `ssn` or a `favourite_colour` field because the schema does not offer one. That is your first validator, and it costs nothing.
+
+Each field then maps to a validator that returns `(ok, value_or_reason)`:
+
+```python
+POLICY_RE = re.compile(r"^[A-Z]{2}\d{6,8}$")
+
+
+def validate_policy_number(value: str) -> tuple[bool, str]:
+    v = value.strip().upper().replace(" ", "").replace("-", "")
+    if POLICY_RE.match(v):
+        return True, v
+    return False, "a policy number is two letters then six to eight digits, like AB123456"
+
+
+def validate_date_of_loss(value: str, today: date | None = None) -> tuple[bool, str]:
+    today = today or TODAY
+    try:
+        d = datetime.strptime(value.strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return False, "give the date of loss as year-month-day, like 2026-06-30"
+    if d > today:
+        return False, "the date of loss cannot be in the future"
+    return True, d.isoformat()
+
+
+def normalize_yesno(value: str) -> tuple[bool, str]:
+    v = value.strip().lower().rstrip(".!")
+    if v in _YES:
+        return True, "yes"
+    if v in _NO:
+        return True, "no"
+    return False, "answer needs to be yes or no"
+```
+
+Two design choices are worth copying.
+
+**Normalise, then validate.** The policy validator strips spaces and dashes and uppercases before it checks the pattern. STT spacing is noise, not a mistake by the caller, so the tool absorbs it instead of making the caller repeat themselves.
+
+**Return the stored value, not just "ok".** The validated value is what goes in the record and on the screen. "ab-123456" is stored as `AB123456`; "Yeah." is stored as `yes`. The caller hears and sees the canonical form, which is what a human adjuster would see later.
+
+## Reject with a reason the model can say
+
+Here is the tool itself:
+
+```python
+@function_tool()
+async def record_field(self, context: RunContext[dict], field: FieldName, value: str) -> str:
+    """Record one field of the auto claim.
+
+    Use the exact field name. Pass date_of_loss as YYYY-MM-DD.
+    """
+    ok, result = VALIDATORS[field](value)
+    if not ok:
+        return f"rejected: {result}. Ask the caller again."
+    claim = context.userdata["claim"]
+    claim[field] = result
+    _publish_claim(self.room, claim)
+    return f"recorded {field}"
+```
+
+The rejection string is the interesting part. It is written for the model to paraphrase to a person: "a policy number is two letters then six to eight digits, like AB123456". It names the rule and gives an example, and it ends with what to do next ("Ask the caller again"). The instructions back it up with one sentence: if `record_field` rejects a value, tell the caller the reason in one sentence and ask again.
+
+Compare that with a tool that raises an exception or returns `"invalid"`. The model then has to guess what was wrong, and its guess is usually "could you repeat that?", which gets the same wrong answer back.
+
+The state handling is the same pattern as the [water tracker](/blog/voice-agent-state-water-tracker): the claim lives in per-call `userdata`, only the tool writes to it, and the screen updates from the tool, never from what the model says. A field shows up on the form only after it passed validation.
+
+## Gate the irreversible step
+
+Filing is the one action you cannot take back. In production it creates a claim in a core system, can assign an adjuster, and may start a regulatory clock. The demo guards it with a second tool:
+
+```python
+@function_tool()
+async def file_claim(self, context: RunContext[dict]) -> str:
+    """File the claim. Refuses until every field has been recorded."""
+    claim = context.userdata["claim"]
+    missing = [f for f in FIELDS if not claim.get(f)]
+    if missing:
+        labels = ", ".join(FIELD_LABELS[f] for f in missing)
+        return f"cannot file yet, still missing: {labels}"
+    ref = context.userdata.get("claim_ref")
+    if not ref:
+        ref = _make_claim_ref()
+        context.userdata["claim_ref"] = ref
+    _publish_filed(self.room, claim, ref)
+    return f"Filed. The claim number is {ref}."
+```
+
+Three properties make this safe to hand to a model:
+
+- **It refuses early, with the missing list.** If the model jumps the gun, the tool tells it exactly which fields to go back for. The model does not have to track completeness; the tool does.
+- **It is idempotent.** A second call returns the same claim number. Models do repeat tool calls, especially after an interruption, and a duplicate claim is a real cost for an insurer.
+- **Confirmation lives in the conversation, completeness lives in code.** The instructions ask for a read-back and a yes before `file_claim`. The tool cannot hear the yes, so it enforces the part it can check. In production I would add a `confirmed` flag set by its own tool so the gate covers both.
+
+## Tell the model what day it is
+
+The validator rejects a date in the future. The model is asked to turn "yesterday" into `YYYY-MM-DD`. Neither works unless both sides agree on today's date, and an LLM has no clock. Without the date in its context, the model guesses one, and the guess comes from its training data.
+
+Moving this demo onto our shared worker surfaced a second version of the same bug. The agent captures `TODAY = date.today()` once at import. That is fine for a demo you start, use and stop. On a worker that stays up for days, `TODAY` freezes at the day it booted, and from the next day an accident "this morning" is rejected as being in the future.
+
+The hosted wrapper fixes both without touching the contributed agent: it swaps the validator for one that reads the current date on every call, and appends today's date to the instructions.
+
+```python
+def today() -> date:
+    return datetime.now(UTC).date()
+
+
+_module.VALIDATORS["date_of_loss"] = lambda value: _module.validate_date_of_loss(value, today())
+
+
+def instructions() -> str:
+    return _module.INSTRUCTIONS + HOSTED_INSTRUCTIONS.format(today=f"{today():%A, %B %d, %Y}")
+```
+
+If your agent does anything relative to time (dates of loss, appointment slots, "next Friday"), put the current date and timezone in the instructions on every session and make your validators read the clock, not a constant.
+
+## Try it
+
+Sign in with GitHub to use the short daily allowance across the playground demos. Use made-up details: nothing is filed or saved.
+
+<PlaygroundDemo demo="claim" />
+
+Things worth trying, because they are where intake agents break:
+
+- Give a policy number of "12345". The tool rejects it and the agent explains the format.
+- Say the accident happened tomorrow. The date validator refuses it.
+- Answer "I'm Alex Chen, it happened yesterday on the 401" in one breath. Watch three fields fill from one turn.
+- Ask it to file the claim after two fields. It lists what is still missing.
+- Say "yeah" and "nope" for the last two questions. The form shows `yes` and `no`.
+
+The call is capped at two minutes, so the hosted version also tells the model to record every detail a caller gives at once instead of re-asking.
+
+## Hosting it on a different stack
+
+The contributed demo runs on AssemblyAI Universal-3 Pro for STT, Gemini 3 Flash for the LLM and Inworld for TTS. Our playground meters every call per visitor, and its cost sink only knows Deepgram, OpenAI and Cartesia pricing, so the hosted copy runs on Deepgram Nova-3, gpt-4o-mini and Cartesia Sonic 2.
+
+The swap happens in a wrapper, not in the demo:
+
+```python
+class HostedClaim(HostedGuard, ClaimIntake):
+    demo = "claim"
+    # Eight fields, a read-back and filing: each answer is a tool call plus a reply.
+    llm_budget = 24
+    greeting = (
+        "Say this is an auto claim intake simulation: nothing is filed or saved, "
+        "so use made-up details. Ask for their name to start the claim."
+    )
+```
+
+`HostedGuard` replaces the STT, LLM and TTS on the agent and enforces per-call limits. The claim demo needed one change there: a per-demo LLM request budget. Every answer costs two model requests (one to call `record_field`, one to reply after the result), so eight fields plus a read-back and filing do not fit in the twelve requests a coffee order needs.
+
+Because the tools and validators are plain Python, none of this changed behaviour. The same `record_field` runs on Gemini and on gpt-4o-mini, and the same rejection strings come back. That portability is a side effect of keeping the rules in code: the prompt is the only part that might need tuning per model, and it carries no business rules.
+
+## Testing it
+
+The validators are pure functions, so the bulk of the test suite needs no model:
+
+```python
+def test_policy_number_normalizes_and_accepts():
+    ok, value = validate_policy_number("ab 123456")
+    assert ok and value == "AB123456"
+
+
+def test_date_rejects_future():
+    ok, reason = validate_date_of_loss("2099-01-01", today=date(2026, 7, 8))
+    assert not ok and "future" in reason
+```
+
+The repository also has an [LLM-judged eval](https://github.com/mahimairaja/awesome-voice-apps/blob/421135071b6279dc18b211a8a03c13d27edc0ece/tests/claim-intake/test_claim_intake.py) that runs a nine-turn text conversation through `AgentSession` and asks judges whether the claim was captured and filed with the right tools. The unit tests prove the rules; the eval checks that the model calls the right tool with the right field. Keep both, and run only the second against a real API key.
+
+## What this means for you
+
+1. **Move every format rule out of the prompt.** If a rule can be written as a regex, a date comparison or a lookup, it belongs in the tool that stores the value, with a unit test.
+2. **Write rejection strings for the model to say out loud.** Name the rule, give an example, say what to do next. "Invalid" is not a reason.
+3. **Gate and dedupe every irreversible tool.** Refuse with the list of what is missing, return the same reference on a repeat call, and give the model today's date before it does any date maths.
+
+The [claim intake source](https://github.com/mahimairaja/awesome-voice-apps/tree/421135071b6279dc18b211a8a03c13d27edc0ece/demos/claim-intake) runs with `uv sync` and `uv run python agent.py console` once you add AssemblyAI, Google, Inworld and LiveKit keys. The [LiveKit tools documentation](https://docs.livekit.io/agents/logic/tools/definition/) covers `function_tool`, type hints and `RunContext`.
+
+If you are putting a voice agent in front of claims, intake or any workflow that writes to a system of record, validation and gating are among the first things we check in a [production readiness review](/contact).
