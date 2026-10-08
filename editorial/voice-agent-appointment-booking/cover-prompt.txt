@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/clinic-scheduler.webp in mahimai.ca, which currently holds a flat placeholder.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light and leaf shadows, pale marble counter, a sprig of lavender in a small ceramic pot, muted lavender accents.
+
+Subject: a quiet clinic reception desk. A paper desk calendar with a grid of time slots, one slot filled in lavender with a tick, and one slot outlined with a dashed pencil line where an appointment used to be (a visible reschedule). Beside it a stethoscope coiled on the counter, a clipboard with blank lines, and a matte black desk microphone with a thin lavender ring, like the coffee counter card.
+
+Composition: objects arranged left to right along the counter, generous empty wall above for overlay, eye-level, shallow depth of field. Morning light from the upper right. Calm, clean, reassuring mood. No people, no text, no logos, no UI, no medical crosses.
