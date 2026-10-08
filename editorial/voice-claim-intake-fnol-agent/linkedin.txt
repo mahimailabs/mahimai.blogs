@@ -1,0 +1,17 @@
+"Policy number? A B one two three four five six. No wait, that's my old one."
+
+That is a normal first notice of loss call. Most claim intake voice agents handle it with a rule in the prompt. The model mostly follows it. Mostly is the problem.
+
+What works better:
+→ one record_field tool, with the field name as an enum, so the model cannot invent fields
+→ a validator per field that normalises STT noise, then checks the rule
+→ rejections written as a sentence the model can say: "two letters then six to eight digits, like AB123456"
+→ a file_claim tool that refuses until every field is in, and returns the same claim number if called twice
+
+One bug I hit moving it to our shared worker: the agent captured today's date at startup. A worker that runs for days starts rejecting "this morning" as a future date. Give the model the date every session, and make validators read the clock.
+
+We just put the claim intake demo from awesome-voice-apps in our playground. Give it a bad policy number and watch it push back.
+
+Which rule in your agent still lives only in the prompt?
+
+https://mahimai.ca/blog/voice-claim-intake-fnol-agent
