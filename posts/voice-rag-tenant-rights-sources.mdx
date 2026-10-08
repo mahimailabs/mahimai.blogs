@@ -59,16 +59,16 @@ return RetrieveResult(hits=hits, covered=best >= floor, best_score=best)
 
 The floor depends on the embedding model, and it is not portable. The contributed demo runs on NVIDIA NIM's `nv-embedqa-e5-v5` with a floor of 0.33, tuned so real renter questions (about 0.38 and up on that model) clear it and small talk (about 0.25) does not. When we moved the hosted copy to OpenAI's `text-embedding-3-small`, I measured again against the same eight sections:
 
-| Utterance | Closest section | Score |
+| Utterance | Closest section | Cosine |
 |---|---|---|
-| Can my landlord come into my apartment without telling me? | Landlord entry and notice | 0.560 |
-| How long does my landlord have to return my security deposit? | Security deposits | 0.554 |
-| Can they evict me without going to court? | Eviction basics and notice | 0.538 |
-| I use a wheelchair, can I ask for a ramp? | Reasonable accommodations and modifications | 0.453 |
-| They won't rent to me because I have kids | Fair housing and discrimination protections | 0.320 |
-| how are you doing today | (below the floor) | 0.171 |
-| hi there | (below the floor) | 0.140 |
-| tell me a joke | (below the floor) | 0.095 |
+| Can my landlord come into my apartment without telling me? | Landlord entry and notice | 0.56 |
+| How long does my landlord have to return my security deposit? | Security deposits | 0.55 |
+| Can they evict me without going to court? | Eviction basics and notice | 0.54 |
+| I use a wheelchair, can I ask for a ramp? | Reasonable accommodations and modifications | 0.45 |
+| They won't rent to me because I have kids | Fair housing and discrimination protections | 0.32 |
+| how are you doing today | (below the floor) | 0.17 |
+| hi there | (below the floor) | 0.14 |
+| tell me a joke | (below the floor) | 0.10 |
 
 On this model the hosted copy uses 0.25. The weakest real question I tried scored 0.32 (familial status phrased casually, with no word from the section title), and the chattiest off-topic line scored 0.17. Keeping the old 0.33 would have quietly thrown away the "kids" question, which is exactly the kind of fair housing question the guidance exists for.
 
