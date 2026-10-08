@@ -1,0 +1,205 @@
+---
+title: 'Voice Agent Audio Quality: Re-Confirm on a Bad Line'
+description: 'Score caller audio live with Tyto in a LiveKit voice agent, adapt when the line degrades, and re-confirm any detail captured over bad audio.'
+pubDate: 2026-10-08
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'audio-quality', 'tyto', 'function-calling']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** Your voice agent hears a transcript, not a phone line, so it cannot tell a clean "BXRT 451" from a guess made through wind noise. Score the caller's raw audio on the side (we use ai-coustics Tyto on a rolling five-second window), smooth the score, and stamp every captured field with the line quality at the moment it was heard. Fields heard on a bad line get read back before the agent acts on them. Try it below with music playing.
+
+A driver on the shoulder of a highway, trucks going past, phone on speaker. They read you their plate. Your STT returns a confident string, your LLM calls `set_plate`, and a tow truck goes to the wrong car.
+
+Nothing in that chain was "wrong". Speech-to-text always returns its best guess, and the model has no way to know the guess was made through highway traffic. The information that would have saved you was in the audio, and the cascade threw it away at the first step.
+
+This post walks through the [roadside dispatch demo](https://github.com/mahimairaja/awesome-voice-apps/tree/421135071b6279dc18b211a8a03c13d27edc0ece/demos/roadside-dispatch) in awesome-voice-apps. It adds a second, quiet listener to the call: a model that scores how trustworthy the audio is, and a gate that uses that score to decide which details need a read-back.
+
+## The transcript hides the line
+
+A cascaded voice agent turns audio into text once, at the very start. From that point on, everything downstream (turn detection, the LLM, your tools) works on text that looks equally confident whether the caller was in a quiet kitchen or under an overpass.
+
+You can try to recover the signal from the text side: STT word confidences, odd tokens, repeated "sorry?". Those help, but they are symptoms, and they arrive after the damage. I prefer to measure the cause directly, from the same audio the STT receives, and keep that measurement next to every value the agent captures.
+
+Three things need to happen:
+
+1. **Score** the caller's audio continuously, without touching the STT path.
+2. **Adapt** the conversation when the score crosses a line: say what is wrong, ask the caller to fix it, change turn-taking.
+3. **Gate** the data: any field captured while the line was bad is marked unconfirmed, and the agent cannot act until it is read back.
+
+The third one is the point. The first two make the demo feel smart; the gate is what keeps the wrong truck in the depot.
+
+## Scoring the audio with Tyto
+
+[Tyto](https://docs.ai-coustics.com/models/audio-insight/tyto) is an audio-quality model from ai-coustics. It looks at a fixed five-second window and returns a `risk_score` between 0 and 1, which the docs describe as an audio-derived risk indicator for downstream STT, VAD and turn-taking failures, plus per-cause dimensions such as noise, reverb, interfering speech and packet loss. Speaker loudness comes back too, but as a neutral level reading, not a quality score.
+
+The demo taps the caller's LiveKit audio track with an `AudioStream`, keeps the last five seconds in a buffer, and scores once per second:
+
+```python
+stream = rtc.AudioStream(track, num_channels=1)
+buffer: list[float] = []
+since_hop = 0
+
+async for event in stream:
+    frame = event.frame
+    sample_rate = frame.sample_rate
+    samples = np.frombuffer(frame.data, dtype=np.int16).astype(np.float32) / 32768.0
+    buffer.extend(samples.tolist())
+    since_hop += len(samples)
+
+    window = int(WINDOW_SECONDS * sample_rate)  # 5 s
+    hop = int(HOP_SECONDS * sample_rate)  # 1 s
+    if len(buffer) > window:
+        del buffer[: len(buffer) - window]
+
+    if len(buffer) >= window and since_hop >= hop:
+        since_hop = 0
+        chunk = np.asarray(buffer, dtype=np.float32)
+        # Inference is blocking; keep it off the event loop.
+        results = await asyncio.to_thread(analyzer.analyze, chunk, sample_rate, len(chunk))
+        result = results[-1]
+        raw = {name: float(getattr(result, name)) for name in ("risk_score", *DIMENSIONS)}
+        health.update(raw)
+```
+
+Two choices here are worth copying.
+
+**It is a side channel.** The scorer reads its own `AudioStream` from the same track. The STT path is untouched, so a slow or failing scorer can never add latency to the conversation. If Tyto is down, you lose the meter, not the call.
+
+**Inference runs in a thread.** `analyze` is synchronous. Calling it on the event loop would stall your agent's audio for the length of every inference, which is precisely the kind of packet-loss-shaped bug you are trying to measure.
+
+The model file is small. On SDK 2.5 the `tyto-l-16khz` model is about 20 MB on disk, and loading it plus the SDK added roughly 40 MB of resident memory in my measurement, so it fits comfortably beside a LiveKit worker. Note that the current ai-coustics docs describe a newer Tyto release and SDK; the demo pins `aic-sdk>=2.4,<3.0`, so check the dimension names against the version you install.
+
+## Smooth before you act
+
+A single five-second window is noisy. A door slams, one window spikes, and if you react to it your agent apologises for a bad line that was fine a second later. The ai-coustics docs recommend smoothing per-window scores, or requiring several consecutive problem windows, before acting. The demo does both, in a pure module with no LiveKit or Tyto imports:
+
+```python
+EMA_ALPHA = 0.3
+CONSECUTIVE_WINDOWS = 2  # armed windows before an intervention fires
+
+
+def ema(prev: float | None, value: float, alpha: float = EMA_ALPHA) -> float:
+    if prev is None:
+        return value
+    return alpha * value + (1 - alpha) * prev
+
+
+def update(self, raw: dict[str, float]) -> None:
+    self.risk = ema(self.risk, raw["risk_score"])
+    for d in DIMENSIONS:
+        self.dims[d] = ema(self.dims.get(d), raw.get(d, 0.0))
+    for d in DEGRADATIONS:
+        armed = self.dims[d] >= INTERVENTION_THRESHOLDS[d]
+        self._streak[d] = self._streak.get(d, 0) + 1 if armed else 0
+```
+
+The EMA turns the risk score into something you can show a human. The streak counter turns each dimension into an event that fires once per episode and clears when it drops back. Keeping this logic in a plain dataclass means the whole state machine is unit-tested without audio.
+
+On thresholds, my opinion is firm: **treat every published band as a starting point, not a constant.** The demo bands risk at 0.35 and 0.60. The current Tyto docs list provisional bands of 0.30 and 0.50 and say outright that 0.50 is not a 50% failure probability. Neither number knows your callers, your microphones or your STT. Log the smoothed score next to the outcome of every captured field, then move the threshold to where read-backs start catching real errors.
+
+## Adapt the conversation, out loud
+
+When a degradation fires, the agent says what it noticed and what it will do, in words a stressed driver understands:
+
+```python
+INTERVENTION_LINES = {
+    "noise": "It is getting noisy on your end. I will speak up and confirm the key details.",
+    "media_speech": "I can hear a radio in the background. Could you turn it down so I get this right?",
+    "interfering_speech": "There are other voices coming through. I will focus on just you now.",
+    "packet_loss": "The line is breaking up. Let me confirm the important details as we go.",
+    "speaker_reverb": "You sound far away. Could you move closer to the phone or out from the overpass?",
+}
+```
+
+Each cause gets its own line because each has a different fix. "Turn down the radio" is useless advice for packet loss. Naming the cause is also what makes the caller cooperate: "I can't hear you" invites them to shout, "I can hear a radio" gets the radio turned off.
+
+Interfering speech also changes turn-taking. While other voices are on the line, the demo disables barge-in so a passenger talking in the back seat does not keep cutting the agent off, and re-enables it when that dimension clears. The Tyto docs list exactly this (disable barge-in, switch turn-taking, prompt the user) among the real-time uses of the score.
+
+## Gate the fields, not the call
+
+This is the part I would put in every agent that captures data a human will act on. Each capture tool stamps the field with the line state at the moment it was heard:
+
+```python
+def field_state(self) -> str:
+    """The gate's verdict for a field captured right now."""
+    return "clean" if self.band == "good" else "needs_confirmation"
+
+
+def _capture(self, name: str, value: str) -> str:
+    state = self.health.field_state()  # clean | needs_confirmation
+    self.fields[name] = {"value": value, "state": state}
+    _publish_details(self.room, self.fields)
+    return state
+
+
+@function_tool()
+async def set_plate(self, context: RunContext, plate: str) -> str:
+    """Record the license plate."""
+    if self._capture("plate", plate) == "needs_confirmation":
+        return f"The line is breaking up. I have plate {plate}. Can you confirm it?"
+    return f"Got it, plate {plate}."
+```
+
+The tool result is the instruction. When the line was rough, the model is handed a read-back sentence instead of an acknowledgement, so the agent asks "I have plate BXRT 451, can you confirm it?" without any prompt engineering about audio. A clean capture gets a plain "Got it", and the caller is not interrogated on a good line.
+
+Then `dispatch` refuses to act while anything is unconfirmed:
+
+```python
+@function_tool()
+async def dispatch(self, context: RunContext) -> str:
+    """Dispatch help once every critical field is captured and confirmed."""
+    missing = [n for n in CRITICAL_FIELDS if n not in self.fields]
+    if missing:
+        return f"I still need your {', '.join(missing)} before I can send help."
+    unconfirmed = [n for n in CRITICAL_FIELDS if self.fields[n]["state"] == "needs_confirmation"]
+    if unconfirmed:
+        return f"The line was rough. Let me confirm your {', '.join(unconfirmed)} first."
+    self.dispatched = True
+    return "All details are confirmed. Dispatching help now."
+```
+
+Notice what this is not. It does not block the whole call on a bad score, and it does not ask the model to "be careful when audio is poor". It attaches a fact to each value and lets a deterministic tool enforce the rule. The model only decides what the caller meant; the application decides whether that is safe to act on. It is the same split as [letting the tool own the count](/blog/voice-agent-state-water-tracker), applied to trust instead of arithmetic.
+
+The instructions add one subtlety worth stealing: treat only a clear yes as confirmation. If the caller starts correcting the value during the read-back, the agent re-captures it with the tool, which re-stamps it against the current line, instead of confirming a value the caller just disputed.
+
+## Try it
+
+Sign in with GitHub to get a short daily allowance across the playground demos. Report a breakdown, then make the line worse and watch the panel on the right.
+
+<PlaygroundDemo demo="roadside" />
+
+Things worth trying:
+
+- **Give your plate with music playing near the mic.** The background media meter climbs, the agent asks you to turn it down, and the plate lands as unconfirmed.
+- **Step back from your laptop** while you give the callback number. Reverb rises and the agent asks you to come closer.
+- **Turn the music off and give the next detail.** It lands as clean, with no read-back.
+- **Ask it to dispatch early.** It lists exactly which details are missing or unconfirmed.
+
+A browser call over Wi-Fi rarely shows real packet loss, so noise, media and distance are the dimensions you will see move. Phone calls through SIP are where packet loss earns its meter.
+
+## Hosting it next to other demos
+
+The playground runs several demos on one shared LiveKit worker, so the hosted version wraps the contributed agent rather than editing it. Three changes were needed.
+
+**One model per worker, one analyzer per call.** The Tyto model is loaded once and shared; each call creates its own analyzer, so smoothing state never leaks between visitors. The model file is downloaded when the container image is built, not on the first call.
+
+**Scoring is optional.** Tyto needs an ai-coustics licence key. Without one, the hosted dispatcher still runs and the panel says scoring is off, every field captures as clean, and the conversation works like any other demo. A dependency that can fail should degrade a feature, not the call.
+
+**Listen for the right state change.** The demo ends the call after dispatch by watching for the agent to go from speaking to idle. In livekit-agents 1.x a local session goes back to `listening` after speech, so the hosted wrapper watches for that instead. Small, but it is the difference between a call that closes politely and one that waits for the idle timeout.
+
+## Cost and licensing
+
+Tyto runs locally, but it is not free to run. ai-coustics licenses its SDK by subscription, with a 30-day free trial, and [meters usage by the duration of audio processed](https://docs.ai-coustics.com/models/get-started/pricing). Scoring a five-second window every second means overlapping windows: the [real-time guide](https://docs.ai-coustics.com/models/audio-insight/real-time-analysis) notes that a one-second interval analyzes overlapping audio. Check how your plan counts that before you pick a hop. A two-second hop halves the work and, with smoothing, still reacts within a few seconds.
+
+## What this means for you
+
+1. **Keep audio quality next to your data.** Every value your agent captures should carry the line state it was heard on. That one field turns "the agent got the plate wrong" from a mystery into a query.
+2. **Gate actions in tools, not prompts.** "Be careful on a bad line" is a wish. A `dispatch` tool that refuses unconfirmed fields is a guarantee.
+3. **Calibrate on your own calls.** Start with the published bands, log scores against field corrections, and move the thresholds until read-backs catch real errors without nagging callers on good lines.
+
+The [roadside dispatch source](https://github.com/mahimairaja/awesome-voice-apps/tree/421135071b6279dc18b211a8a03c13d27edc0ece/demos/roadside-dispatch) runs with `uv sync`, `uv run python agent.py download-files` and `uv run python agent.py dev` once you add LiveKit, Deepgram, OpenAI and Cartesia keys and an `AIC_SDK_LICENSE` from the ai-coustics developer platform. The [Tyto documentation](https://docs.ai-coustics.com/models/audio-insight/tyto) covers the score, the dimensions and the smoothing guidance in more depth.
+
+If your agent takes addresses, plates, account numbers or anything else a person will act on, how it behaves on a bad line is one of the first things we test in a [production readiness review](/contact). It is the failure your demo never shows and your callers hit on day one.
