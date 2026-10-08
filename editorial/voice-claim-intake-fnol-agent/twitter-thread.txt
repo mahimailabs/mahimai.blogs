@@ -1,0 +1,14 @@
+1/ Claim intake by voice looks like a form. It is a form read aloud by someone who just crashed their car: out of order, mumbled, two answers at once. Here is how to make an FNOL voice agent that never files bad data.
+
+2/ Rules in the prompt are suggestions. STT turns "AB123456" into "a b 1 2 3 4 5 6", the model wants to be agreeable, and you cannot unit test a prompt. Put every format rule in code, in the tool that stores the value.
+
+3/ One record_field tool. The field name is a Literal, so LiveKit puts an enum in the schema and the model cannot record a field you never defined. Each field maps to a validator that normalises first, then checks.
+
+4/ Rejections are written for the model to say: "a policy number is two letters then six to eight digits, like AB123456. Ask the caller again." Name the rule, give an example, say what to do next.
+
+5/ file_claim refuses until every field is in and lists what is missing. A second call returns the same claim number. Models repeat tool calls; insurers hate duplicate claims.
+
+6/ The model has no clock. Put today's date in the instructions, and make validators read the date per call. A date captured at import breaks the day after your worker boots.
+
+7/ File a made-up claim in our playground and read the full walkthrough, code included:
+https://mahimai.ca/blog/voice-claim-intake-fnol-agent
