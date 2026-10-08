@@ -1,0 +1,16 @@
+1/ "Can you move it to Tuesday afternoon?"
+
+Most booking voice agents fail here because the model is writing dates and times into the calendar. A short thread on booking by slot id instead.
+
+2/ A booking tool that takes date and time strings stacks three error sources: relative dates ("next Monday"), speech recognition ("two thirty" vs "two to three"), and availability the model cannot see.
+
+3/ Rule: a search tool offers slots with ids, the model picks an id, the booking tool accepts only ids it offered. The caller hears "Monday at nine with Dr. Chen". The tool gets s1.
+
+4/ Every guard returns a sentence that steers the model. Unknown id: ask the caller to pick another. Already booked: use reschedule. Same slot: pick a different one. No silent double bookings.
+
+5/ Rescheduling is a swap. Validate the new slot first, then return the old one to inventory. A failed move leaves the caller with the appointment they had.
+
+6/ The calendar on screen listens to tool events on the LiveKit data channel, not to speech. If the model says 2:30 and the tool booked 9:00, you see the bug in the demo.
+
+7/ Try it live in our playground and read the full walkthrough, code included:
+https://mahimai.ca/blog/voice-agent-appointment-booking

@@ -1,0 +1,19 @@
+"Can you move it to Tuesday afternoon?"
+
+That sentence is where most booking voice agents quietly fail.
+
+If your booking tool takes a date and a time as strings, the model is writing calendar entries from speech. Relative dates, a bad transcript, or a slot that does not exist all turn into confident confirmations.
+
+The fix is small:
+→ a search tool returns open slots with ids
+→ the model passes an id back, never a time
+→ the booking tool refuses any id it did not offer, and says what to do instead
+→ rescheduling is a swap between two ids: validate the new one, then release the old one
+
+The takeaway: the only free text in a booking tool should be things that are actually free text, like the patient's name and the reason for the visit.
+
+We just put the clinic scheduler from awesome-voice-apps in our playground. Ask what is open, book a checkup, move it to another day, and watch the calendar follow each tool call.
+
+How does your agent handle "book me Thursday at 4" when Thursday at 4 does not exist?
+
+https://mahimai.ca/blog/voice-agent-appointment-booking

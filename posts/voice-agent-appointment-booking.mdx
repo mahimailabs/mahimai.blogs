@@ -1,0 +1,311 @@
+---
+title: 'Voice Agent Appointment Booking: Book by Slot ID'
+description: 'Build a LiveKit voice agent that books and reschedules appointments without inventing times: tools own the slots, the model only picks an id.'
+pubDate: 2026-10-08
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'function-calling', 'appointment-booking', 'scheduling']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** A booking voice agent should never write a date or a time into a booking. Let a tool list the open slots with ids, make the model pass one of those ids back, and have the booking tool refuse anything it did not offer. Rescheduling is then a swap between two ids, and the calendar on screen can only show slots a tool produced. Try the clinic scheduler below, then read the 400-line agent that does it.
+
+"Do you have anything Monday morning? Actually, Tuesday is better. Can you move it to the afternoon?"
+
+A receptionist handles that without blinking. A voice agent that books by free text handles it by writing "Tuesday afternoon" into a calendar that has no Tuesday afternoon, or by confidently confirming a 2:30 slot that someone else already holds. The fix is not a better prompt. It is taking the calendar out of the model's hands.
+
+This post walks through the clinic scheduler in [awesome-voice-apps](https://github.com/mahimairaja/awesome-voice-apps/tree/421135071b6279dc18b211a8a03c13d27edc0ece/demos/clinic-scheduler). It finds open slots, books one, reschedules it and cancels it, and the model never types a time.
+
+## The model should pick, not write
+
+When a booking tool takes `date: str, time: str`, the model has to turn speech into a calendar entry. That is three error sources stacked on each other:
+
+1. **Relative dates.** "Next Monday", "tomorrow", "the day after" all need today's date and a calendar. Models get this wrong often enough that you will see it in a week of real calls.
+2. **Speech recognition.** "Two thirty" and "two to three" are one bad transcript apart. If the model writes the time, a transcription error becomes a booking error with no log line pointing at it.
+3. **Availability.** The model has no idea what is free. It can only repeat what a tool told it, and free text gives it room to repeat it slightly wrong.
+
+So the clinic scheduler uses one rule: **a tool offers slots with ids, the model chooses an id, and the booking tool accepts only ids it offered.** Everything the caller hears about times comes from a tool result.
+
+## Slots are per-call inventory
+
+Each call builds its own slot list from today's date, so the demo never shows a stale Monday:
+
+```python
+_SLOT_TEMPLATE = [
+    (0, "9:00 AM", "Dr. Chen"),
+    (0, "2:30 PM", "Dr. Patel"),
+    (1, "10:00 AM", "Dr. Chen"),
+    (1, "3:00 PM", "Dr. Patel"),
+    (2, "11:30 AM", "Dr. Lee"),
+    (3, "8:30 AM", "Dr. Chen"),
+]
+
+
+def _build_slots() -> list[dict]:
+    days: list[datetime.date] = []
+    day = datetime.date.today()
+    while len(days) < 4:
+        day += datetime.timedelta(days=1)
+        if day.weekday() < 5:  # Monday-Friday
+            days.append(day)
+    return [
+        {
+            "id": f"s{i + 1}",
+            "date": f"{days[offset].strftime('%A %B')} {days[offset].day}",
+            "time": time,
+            "doctor": doctor,
+        }
+        for i, (offset, time, doctor) in enumerate(_SLOT_TEMPLATE)
+    ]
+```
+
+The weekday in the label is computed from a real date, so "Monday October 12" is always a Monday. That sounds trivial until a model reads a hardcoded "Monday June 10" in October and the caller asks which year.
+
+The list lives in the session's `userdata`, next to the booking and a set of mounted UI components:
+
+```python
+userdata: dict = {
+    "available_slots": _build_slots(),
+    "booking": None,
+    "ui_mounted": set(),
+}
+```
+
+It is built inside the entrypoint, once per job. On our hosted playground several calls share one worker process, so a module-level slot list would let one visitor book a slot out from under another. That is the same rule as the [water tracker post](/blog/voice-agent-state-water-tracker): state is per call, and tools are its only writers.
+
+## find_slots hands the model ids
+
+The search tool filters the inventory, puts the result on screen, and returns a line the model can read back:
+
+```python
+@function_tool()
+async def find_slots(
+    self,
+    context: RunContext[dict],
+    date_preference: str | None = None,
+    doctor: str | None = None,
+) -> str:
+    """Return available appointment slots, optionally filtered.
+
+    Call this when the caller asks what times are open. Pass date_preference
+    as a partial match like 'Monday' or 'June 10', and/or doctor as a partial
+    name like 'Chen'. Omit both to show all slots.
+    """
+    filtered = context.userdata["available_slots"]
+    if date_preference:
+        keyword = date_preference.lower()
+        filtered = [s for s in filtered if keyword in s["date"].lower()]
+    if doctor:
+        name = doctor.lower()
+        filtered = [s for s in filtered if name in s["doctor"].lower()]
+
+    mounted = context.userdata["ui_mounted"]
+    if not filtered:
+        # Clear the list so the screen does not keep showing stale rows.
+        _publish_slots(self.room, mounted, [])
+        return "No slots match that preference. Try a different day or doctor."
+
+    _publish_slots(self.room, mounted, filtered)
+    return f"Available slots: {_slots_summary(filtered)}"
+```
+
+The return value looks like `s1: Monday October 12 at 9:00 AM with Dr. Chen; s3: ...`. The model says "Monday at nine with Dr. Chen" to the caller and keeps `s1` for the next tool call. The id never needs to be spoken, and the caller never needs to know it exists.
+
+Two details are easy to miss. The empty case still publishes an empty list, so the screen does not keep showing rows from an earlier search. And the filters are plain substring matches on the label, which is deliberately dumb: "Monday" matches, "tomorrow" does not, so the model has to turn "tomorrow" into a weekday before it calls the tool. That is calendar arithmetic in the model again. In a production agent I would resolve relative dates inside the tool, against the clinic's time zone, and keep the model out of it entirely.
+
+## book_appointment refuses what it did not offer
+
+```python
+@function_tool()
+async def book_appointment(
+    self,
+    context: RunContext[dict],
+    slot_id: str,
+    patient_name: str,
+    reason: str,
+) -> str:
+    """Book an appointment for the caller.
+
+    Pass the slot_id from find_slots, the patient full name, and a brief
+    reason for the visit. Call after confirming name and reason with the caller.
+    """
+    existing = context.userdata.get("booking")
+    if existing is not None:
+        return (
+            f"You already have an appointment on {existing['date']} at "
+            f"{existing['time']}. To change it, ask to reschedule."
+        )
+
+    available = context.userdata["available_slots"]
+    slot = next((s for s in available if s["id"] == slot_id), None)
+    if slot is None:
+        return f"Slot {slot_id} is not available. Ask the caller to pick another."
+
+    booking = {
+        "slot_id": slot_id,
+        "date": slot["date"],
+        "time": slot["time"],
+        "doctor": slot["doctor"],
+        "patient": patient_name.strip() or "Unknown",
+        "reason": reason.strip() or "general visit",
+    }
+    context.userdata["booking"] = booking
+    context.userdata["available_slots"] = [s for s in available if s["id"] != slot_id]
+    # ...publish the slot list and the booking card, then confirm
+```
+
+Read the guards as a contract with the model:
+
+- **Unknown id: refuse and say what to do.** If the model invents `s9` or passes a time instead of an id, the tool answers "Slot s9 is not available. Ask the caller to pick another." The model recovers by asking, not by booking something.
+- **Already booked: redirect to the right tool.** A second `book_appointment` would silently double-book in a naive agent. Here it points the model at `reschedule`, the same nudge the water tracker uses to steer an "undo" toward `remove_water`.
+- **Date, time and doctor come from the slot, not the arguments.** The only things the model writes are the patient's name and the reason, which are free text by nature.
+
+The confirmation the model reads back ("Booked. Sam sees Dr. Chen on Monday October 12 at 9:00 AM for a checkup.") is built from the stored booking. If the caller hears a time, it is the time that was booked.
+
+## Rescheduling is a swap
+
+Rescheduling is where free-text booking agents fall apart, because the model has to cancel one thing and create another and keep both straight. With ids it is one tool and one swap:
+
+```python
+@function_tool()
+async def reschedule(
+    self,
+    context: RunContext[dict],
+    new_slot_id: str,
+) -> str:
+    """Move the existing booking to a different slot.
+
+    The caller must already have a booking. Call find_slots first if
+    they need to see new options before picking.
+    """
+    booking = context.userdata.get("booking")
+    if booking is None:
+        return "No booking to reschedule. Book an appointment first."
+
+    if new_slot_id == booking["slot_id"]:
+        return (
+            f"You are already booked into that slot on {booking['date']} "
+            f"at {booking['time']}. Pick a different one to move."
+        )
+
+    available = context.userdata["available_slots"]
+    new_slot = next((s for s in available if s["id"] == new_slot_id), None)
+    if new_slot is None:
+        return f"Slot {new_slot_id} is not available. Try another slot."
+
+    # Return the freed slot to inventory, then re-sort by the original
+    # s1..s6 id so a freed early slot reappears in its natural position
+    # instead of drifting to the end after a reschedule.
+    remaining = [s for s in available if s["id"] != new_slot_id]
+    remaining.append(_freed_slot(booking))
+    remaining.sort(key=lambda s: int(s["id"][1:]))
+    context.userdata["available_slots"] = remaining
+
+    booking.update(
+        {
+            "slot_id": new_slot_id,
+            "date": new_slot["date"],
+            "time": new_slot["time"],
+            "doctor": new_slot["doctor"],
+        }
+    )
+    # ...publish both, footer "rescheduled"
+```
+
+The order matters. The tool validates the new slot **before** it touches the old booking, so a bad id leaves the caller with the appointment they had. It returns the freed slot to inventory, so "actually, put me back where I was" works on the next turn. And the same-slot guard catches a model that "reschedules" by re-sending the current id, which otherwise reads to the caller as a successful move that changed nothing.
+
+`cancel_appointment` is the same idea in reverse: put the slot back in its natural position, clear the booking, and unmount the booking card so the screen matches the state.
+
+## The calendar listens to tools
+
+Every write tool publishes two small events over the LiveKit data channel on the `ui` topic: a `List` with the open slots, and a `Card` with the booking. The browser never parses what the agent says. In the playground, those events drive a small week view: open slots per day, the booked slot highlighted, and a short log of booking tool calls.
+
+The browser treats the events as untrusted input. It accepts them only from the agent participant, only on the `ui` topic, only under 16 KB, and then validates the shape before rendering:
+
+```ts
+if (event.component === 'List' && event.id === 'slots') {
+  const items = props?.items;
+  if (!Array.isArray(items) || items.length > MAX_SLOTS) return null;
+  const slots: Slot[] = [];
+  for (const item of items) {
+    const doctor = text(item?.title, 40);
+    const date = text(item?.subtitle, 40);
+    const time = text(item?.right, 12);
+    if (!doctor || !date || !time) return null;
+    slots.push({ doctor, date, time });
+  }
+  // ...merge into the week view
+}
+```
+
+The useful property is the same one the water tracker had: **the calendar can only show a slot a tool produced.** If the model says "you're booked for 2:30" and the tool booked 9:00, the visitor sees 9:00 highlighted and hears 2:30. A disagreement like that is a bug you notice in a demo instead of in a missed appointment.
+
+## Try it
+
+Sign in with GitHub for a short daily allowance across the playground demos. Ask what is open, book a checkup, then move it. Watch the week view on the right.
+
+<PlaygroundDemo demo="clinic" />
+
+Things worth trying, because they are where booking agents usually break:
+
+- "Book me Thursday at 4." There is no such slot. Expect the agent to say so and offer what is open, not to confirm it.
+- Book a slot, then "move it to Dr. Lee". Expect one reschedule, and your old slot back in the open list.
+- "Book me another one." Expect a redirect to rescheduling, not a second booking.
+- "Cancel it." The booking card clears and the slot reappears in its place.
+
+## What changes when you host it
+
+The playground runs the contributed `agent.py` unchanged. A small adapter loads it by path, and the hosted class mixes it with the guard every cascaded demo shares:
+
+```python
+class HostedClinic(HostedGuard, ClinicScheduler):
+    demo = "clinic"
+    greeting = (
+        "Say this is a scheduling simulation for a demo clinic and no real appointment is made. "
+        "Say the open slots are on screen and ask who the appointment is for and why."
+    )
+
+    def initial_state(self) -> dict:
+        return clinic_state()
+
+    def publish_initial(self) -> None:
+        publish_clinic(self.room, self.session.userdata)
+```
+
+`HostedGuard` swaps the stack to Deepgram, gpt-4o-mini and Cartesia, caps LLM generations, context and TTS input per call, ends the call at the server deadline, and reports metered cost back to the site. The tools and the inventory logic stay exactly as contributed.
+
+One behaviour does change: the hosted version puts the open slots on screen before the agent says a word. A playground call lasts two minutes at most, and spending the first twenty seconds on "what is open?" leaves little time for the interesting part, which is changing your mind. On a phone line you would not do this, because there is no screen; the standalone agent waits for the caller to ask.
+
+## Testing the booking
+
+Because the inventory is plain data, the swap logic is an ordinary unit test with the UI publish patched out. This is the hosted worker's test, trimmed:
+
+```python
+scheduler = hosted_clinic.ClinicScheduler(SimpleNamespace())
+state = hosted_clinic.initial_state()
+context = SimpleNamespace(userdata=state)
+with patch.object(hosted_clinic._module, "publish_ui_event"):
+    await scheduler.book_appointment(context, "s1", "Sam Rivera", "checkup")
+    await scheduler.reschedule(context, "s3")
+assert state["booking"]["slot_id"] == "s3"
+assert [s["id"] for s in state["available_slots"]] == ["s1", "s2", "s4", "s5", "s6"]
+```
+
+It also checks that two calls get separate inventories, and that cancelling unmounts the booking card. No model, no audio, no network.
+
+The repository separately has an [LLM-judged eval](https://github.com/mahimairaja/awesome-voice-apps/blob/421135071b6279dc18b211a8a03c13d27edc0ece/tests/clinic-scheduler/test_clinic.py) that runs "what is open this week?" and "book me the earliest one" through `AgentSession` and asks judges whether the right tools were used. Keep the two apart: the unit test proves the swap is correct, the eval checks that the model reaches for `find_slots` before `book_appointment`. Only the second needs an API key, and only the second can flake.
+
+## What this changes in a real system
+
+The demo's ids are `s1` to `s6` in a per-call list, which hides the hard part of real scheduling: other callers. In production, the pattern stays the same, but the id becomes the scheduling system's own identifier, and booking becomes "try to claim this id" against the backend at the moment of booking. If someone else took it while your caller was deciding, the tool returns "that slot was just taken" with fresh options, and the model handles it exactly like the unknown-id case above. The model's job does not change. Only the tool gets more honest about the world.
+
+## What this means for you
+
+1. **Remove every date and time argument from your booking tools.** Replace them with an id that a search tool returned. Keep free text only for things that are free text, like the reason for a visit.
+2. **Make each write tool refuse what it did not offer, and say what to do instead.** Unknown id, double booking and same-slot moves should all return a sentence that steers the model to the right next step.
+3. **Validate before you mutate in reschedules.** Check the new slot, then release the old one. A failed move should leave the caller with the appointment they had.
+
+The [clinic scheduler source](https://github.com/mahimairaja/awesome-voice-apps/tree/421135071b6279dc18b211a8a03c13d27edc0ece/demos/clinic-scheduler) runs with `uv sync` and `uv run python agent.py console` once you add OpenAI and LiveKit keys. The [LiveKit tools documentation](https://docs.livekit.io/agents/logic/tools/definition/) covers `function_tool` and `RunContext` in more depth.
+
+If your agent books, moves or cancels anything for real customers, tool contracts like these are one of the first things we check in a [production readiness review](/contact). They are cheap to tighten before launch and expensive to debug from call recordings after.
