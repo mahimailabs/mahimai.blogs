@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/skip-the-phone-tree.webp in mahimai.ca, which currently holds the black-stage diagram as a placeholder.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light and leaf shadows, pale light wood desk, muted lavender accents.
+
+Subject: an old beige desk phone with a twelve-key keypad, its coiled cord loose, set slightly back, and in front of it a matte black desk microphone with a thin lavender ring, like the coffee counter card. A small paper sign-post with six blank arrow tabs stands beside them, one tab tinted lavender.
+
+Composition: objects left to right along the desk, generous empty wall above for overlay, eye-level, shallow depth of field. Morning light from the upper right. Calm, slightly playful mood. No people, no readable text or numbers on the keypad, no logos, no UI.

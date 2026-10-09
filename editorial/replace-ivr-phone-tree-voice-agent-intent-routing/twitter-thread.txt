@@ -1,0 +1,13 @@
+1/ Replacing a press-1 menu with "tell me what you need" is easy on clear calls. The test is "my internet is down and the technician never showed up": two queues, one sentence. Here is how we built a router that knows when to ask.
+
+2/ Split the job. A router scores every queue each turn. A few lines of policy decide: route at 75%, otherwise ask one question, cap it at two. The LLM only phrases what the policy chose.
+
+3/ We tried one-token logprobs first. gpt-4o-mini at temperature 0 said internet 100% for that sentence, and moving 100% for "I'm moving and might just cancel". The threshold never fired.
+
+4/ What shipped: one small call, strict JSON schema, one integer per queue adding to 100, told to split when two fit. Same sentences: 50/50. Treat it as a routing signal and tune the threshold on transcripts.
+
+5/ Run it in LiveKit's on_user_turn_completed, before the reply. The router's note is added for that turn only, so stale decisions never pile up in context.
+
+6/ The transfer tool has no department argument. The model cannot route on its own, and every transfer carries a one-sentence handoff note so the caller never repeats themselves.
+
+7/ Race it against a menu with a perfect caller, with the code: https://mahimai.ca/blog/replace-ivr-phone-tree-voice-agent-intent-routing
