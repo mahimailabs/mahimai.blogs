@@ -1,0 +1,15 @@
+"I liked her." "Did you? She rushed the caching question." "Scribe, recap."
+
+Most voice agents assume one person is talking. Put one in a hiring debrief and it answers every line meant for someone else.
+
+A meeting scribe needs three small pieces:
+
+→ End the turn in on_user_turn_completed before the model runs. Forty turns, one LLM call.
+→ Write the speaker into the message itself: [Speaker 2] she rushed the caching question. Leave it unlabelled when you don't know.
+→ Make the scorecard a typed tool call. OpenAI strict schemas reject list[dict]; enums keep the model inside values your UI can render.
+
+The diarizer runs as a sidecar off a tee in stt_node, so swapping it is cheap. In our playground one visitor plays all three interviewers and names each seat aloud. The rest of the agent didn't change.
+
+Run a debrief yourself: https://mahimai.ca/blog/voice-agent-speaker-attribution
+
+Where does your agent break when a second person joins the call?

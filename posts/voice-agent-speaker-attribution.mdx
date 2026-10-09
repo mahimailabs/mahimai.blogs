@@ -1,0 +1,154 @@
+---
+title: 'Multi-Speaker Voice Agents: Know Who Said What'
+description: 'Build a silent meeting scribe with LiveKit: label each speaker, keep the agent quiet until it is called, and turn an attributed transcript into a scorecard.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'diarization', 'multi-speaker', 'function-calling']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** Most voice agents assume one person is talking. A meeting scribe can't: it has to know who said each line, stay quiet while people talk to each other, and only speak when someone asks. The pattern is three small pieces. A speaker label that rides into the model context with every line, a turn hook that ends the turn before the model runs, and a typed tool that turns the attributed transcript into a structured record. You can run a hiring debrief below, playing all three interviewers yourself.
+
+"I liked her. The system design round was strong." "Did you? I thought she rushed the caching question." "Scribe, recap."
+
+That is a hiring panel debrief. Three interviewers, one candidate, ten minutes. What usually comes out of it is a vague consensus and nobody remembering who raised the compensation concern. A scribe agent can fix that, but only if it gets two things right that a normal voice agent never has to think about: **who** is speaking, and **when not to answer**.
+
+This post walks through the [panel scribe demo](https://github.com/mahimairaja/awesome-voice-apps/tree/7ee5154b5b83943dc0e9fa3f587d3bdf221a4338/demos/panel-scribe) in awesome-voice-apps, then explains what we changed to host it in a playground where only one visitor is on the call.
+
+## A turn is not a question
+
+A LiveKit `AgentSession` treats every end of turn as a cue to reply. That is right for a support call and wrong for a meeting. In a debrief, most turns are addressed to the other people in the room. An agent that answers each one is worse than no agent.
+
+The scribe ends the turn before the model runs. `on_user_turn_completed` fires after the user's turn is transcribed and before the LLM is called. Raising `StopResponse` there skips the reply:
+
+```python
+async def on_user_turn_completed(self, turn_ctx, new_message) -> None:
+    text = (new_message.text_content or "").strip()
+    if not text:
+        raise StopResponse()
+    speaker = self.sidecar.display_speaker()
+    if self.sidecar.current_speaker is not None:
+        new_message.content = [f"[{speaker}] {text}"]
+    self.transcript.append({"speaker": speaker, "text": text})
+    publish_transcript(self.room, self.transcript)
+    publish_talk_time(self.room, self.sidecar.talk_time_items(now=loop.time()))
+    if TRIGGER not in text.lower():
+        raise StopResponse()
+```
+
+Three things happen on every turn, and only one of them is the model:
+
+1. **The line is attributed.** The message that goes into the chat context is rewritten to `[Speaker 2] I thought she rushed the caching question`. The model never sees an unlabelled line.
+2. **The screen updates.** The transcript and the talk-time meters are published as UI events whether or not the agent speaks.
+3. **The model only runs on the trigger.** Unless the turn contains "scribe", the hook raises `StopResponse` and the turn ends there. No LLM request, no TTS, no tokens.
+
+That last point matters more than it looks. A ten-minute debrief might be forty turns. With this hook, it is one LLM call at the end, made with forty labelled lines in context. The cost of a silent listener should be close to the cost of transcription, and this is how it gets there.
+
+The trigger is a plain substring check, not an intent classifier. That is deliberate. "Scribe" is not a word that comes up in a debrief by accident, and a substring check costs nothing and can't be talked out of firing. If your trigger word does come up in normal talk, the fix is a less common word, not a model call on every turn.
+
+## The label rides with the line
+
+Where the label lives is the core decision. There are two places you could put "who said this":
+
+- **In a side table**, keyed by turn, that you join back in when the scorecard is written.
+- **In the message itself**, so the model's context is already attributed.
+
+The scribe does the second. When the model is finally asked for a recap, its context looks like a transcript with names on it, which is exactly the document a person would want to summarise. There is no join step to get wrong and no second prompt explaining which turn belongs to whom.
+
+The instructions then lean on it:
+
+> Review the whole conversation so far, where each line is prefixed with the speaker like Speaker 1 or Speaker 2, and call publish_scorecard once. Give one row per interviewer with their strengths, their concerns, and their lean toward hiring.
+
+One guard is easy to miss: the code only rewrites the message when the diarizer has actually labelled someone. During a gap, `current_speaker` is `None`, and writing `[Speaker ?]` into the context would teach the model that an unknown person was in the room. The line is kept unlabelled instead, and the on-screen transcript shows "Speaker ?" so a person can see the gap.
+
+## Diarization as a sidecar
+
+The original demo gets its labels from pyannoteAI Live, a streaming diarization service. It runs beside the speech pipeline, not inside it. The agent overrides `stt_node` to copy every audio frame to the diarizer on its way to speech-to-text:
+
+```python
+async def stt_node(self, audio, model_settings):
+    async def tee():
+        async for frame in audio:
+            self.sidecar.feed_frame(frame)
+            yield frame
+
+    async for event in Agent.default.stt_node(self, tee(), model_settings):
+        yield event
+```
+
+`feed_frame` only drops the frame into a bounded queue (200 frames) and returns. A separate task resamples it to 16 kHz and sends it over a websocket. If the diarizer falls behind, frames are dropped from its queue, and transcription carries on untouched. That is the right failure direction: losing a speaker label is an inconvenience, while losing the words is the whole call.
+
+The sidecar turns `diarization_speaker_start` and `diarization_speaker_end` events into three things: the current speaker, a stable "Speaker 1, Speaker 2" name per raw speaker id, and seconds of talk time per speaker. That event logic is pure, so it is tested without a network. The [sidecar tests](https://github.com/mahimairaja/awesome-voice-apps/blob/7ee5154b5b83943dc0e9fa3f587d3bdf221a4338/tests/panel-scribe/test_sidecar.py) feed it fake events and check the labels, the fallback when one speaker stops, and the talk-time shares.
+
+A caveat from reading the code rather than from running it on a real panel: the label is read when the turn completes, so it is the speaker the diarizer considers current at that moment. With fast handoffs or crosstalk, a short line can be credited to whoever started talking last. For a debrief summary that is tolerable. For anything with legal weight, align diarization segments to word timestamps instead of reading one "current speaker" per turn.
+
+## Make the record a tool call
+
+The scorecard is not prose the agent speaks. It is a tool call with structured rows, rendered as a table, and then a one-sentence spoken summary. That gives you a record you can store and compare across candidates, and it keeps the spoken part short.
+
+When we hosted the demo on OpenAI's `gpt-4o-mini`, the original tool signature was the first thing to break:
+
+```python
+async def publish_scorecard(self, context: RunContext, rows: list[dict], consensus: str) -> str:
+```
+
+`list[dict]` becomes an array of objects with `additionalProperties: true`. LiveKit's OpenAI plugin sends tools in strict mode by default, and OpenAI's structured outputs require every object to list its properties and set `additionalProperties` to false. A free-form `dict` can't satisfy that. The original demo talks to Cerebras instead, so it never hit this.
+
+The fix is a typed row, which is better design anyway:
+
+```python
+class ScorecardRow(BaseModel):
+    interviewer: Literal["Hiring manager", "Engineer", "Recruiter"]
+    strengths: str
+    concerns: str
+    lean: Literal["strong hire", "hire", "no hire", "strong no hire", "undecided"]
+```
+
+Now the model can't invent a fourth interviewer or a lean of "probably". And the screen can validate what it renders against the same five values. If your tool schema is a bag of dicts, you are leaving validation to the prompt, which is the same mistake we covered for [form-filling agents](/blog/voice-claim-intake-fnol-agent).
+
+## One visitor, three seats
+
+The playground has a constraint the original demo doesn't: a call is one visitor and one agent. Diarizing one voice gives you one speaker, which shows nothing.
+
+So the hosted version swaps the diarizer for a **spoken handoff**. The visitor plays every seat and opens each part with it: "Engineer here. Her system design was solid." A small adapter matches the seat at the start of the turn, strips it, and sets the current speaker until the next handoff:
+
+```python
+_HANDOFF = re.compile(
+    r"^\s*(?:(?:ok(?:ay)?|now|so)[\s,]+)?"
+    r"(?:(?:this is|it's|it is|switch(?:ing)? to|speaking as|as|over to)\s+)?"
+    r"(?:the\s+)?(hiring manager|manager|engineer|recruiter)\b"
+    r"(?:\s+(?:here|speaking))?[\s,.:;!-]*",
+    re.IGNORECASE,
+)
+```
+
+It only matches at the start of a turn. "I think the engineer liked her" stays a line by the current seat instead of switching seats. A bare "Recruiter here" changes the seat and ends the turn without a transcript line.
+
+The adapter is short, and it exposes the same attributes the agent already reads from the diarizer (`current_speaker`, `display_speaker()`, `talk_time_items()`). Talk time becomes each seat's share of words rather than seconds. Everything else, from the silent hook to the label in context to the scorecard tool, is the contributed agent's own code. That is the useful property of the sidecar design: the source of the labels is swappable, and the rest of the agent doesn't know or care.
+
+The hosted call also uses the playground's metered stack (Deepgram, `gpt-4o-mini`, Cartesia) instead of the original Deepgram, Cerebras and Rime, so every call stays inside the per-visitor budget.
+
+## Try it
+
+Start a debrief and speak as each seat in turn. Give the engineer a concern and the recruiter a compensation note, then say "scribe, recap" and check that each point landed on the right row.
+
+<PlaygroundDemo demo="panel" />
+
+Things worth trying:
+
+- **Switch mid-thought.** "Recruiter. She wants remote." then "Engineer here, I'd hire." The seat cards highlight who the scribe thinks is talking.
+- **Mention a seat mid-sentence.** "I agree with the engineer" should stay with the current seat.
+- **Stay quiet.** Say a few lines without the trigger. The agent doesn't answer, and nothing is sent to the model.
+
+## What this means for you
+
+If your agent sits in a room with more than one person (a sales call with two buyers, a clinic visit with a caregiver, a standup), the single-speaker assumptions in your stack are bugs waiting for a demo:
+
+- **Decide when not to answer, in code.** End the turn in `on_user_turn_completed` before the model runs. A silent listener should cost about as much as transcription.
+- **Put the speaker in the message.** Label the line in the chat context, and leave it unlabelled when you don't know rather than guessing.
+- **Keep the label source swappable.** Diarization, a spoken handoff, separate participant tracks: if the agent reads one interface, you can change the source without touching the conversation logic.
+- **Type the record.** Strict tool schemas reject loose dicts, and enums keep the model inside the values your UI can render.
+
+The [panel scribe source](https://github.com/mahimairaja/awesome-voice-apps/tree/7ee5154b5b83943dc0e9fa3f587d3bdf221a4338/demos/panel-scribe) runs with `uv sync` and `uv run python agent.py dev` once you add Deepgram, Cerebras, Rime, pyannoteAI and LiveKit keys. Run it with two or three real people around one microphone to see the diarized version.
