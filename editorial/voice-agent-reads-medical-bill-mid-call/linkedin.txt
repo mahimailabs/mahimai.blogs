@@ -1,0 +1,19 @@
+"I owe almost two thousand dollars for an MRI and I don't understand any of these columns."
+
+Health plans hear this all day. The member has the bill in their hand. The voice agent on the line has nothing, so it asks them to read numbers aloud, column by column.
+
+We built the version where the member just shows it:
+→ the photo goes into the live call on a LiveKit byte stream, no upload endpoint or bucket
+→ one vision call copies every line into a strict schema, told never to do math
+→ plain Python finds the errors: duplicates, balance billing, totals that do not add up
+→ the agent cannot say a dollar amount until it fetches that line, which lights it up on screen
+
+The part I would reuse everywhere: do not leave the image in the voice model's context. Read it once into data. Every turn stays fast, and you have a record of what was read.
+
+On our samples it read 44 amounts with zero misreads, in 2 to 3.4 seconds, for about a tenth of a cent. And the clean bill came back clean, which matters more than catching the bad ones.
+
+Try it with a sample bill in our playground.
+
+What does your agent ask callers to read aloud that it could just look at?
+
+https://mahimai.ca/blog/voice-agent-reads-medical-bill-mid-call

@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/medical-bill-explainer.webp in mahimai.ca, which currently holds a flat vector placeholder in the style of claim-intake.webp.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light and leaf shadows, pale wood desk, a sprig of lavender in a small ceramic pot, muted lavender accents.
+
+Subject: a single printed medical statement lying slightly angled on the desk, its rows abstract grey lines, one row softly highlighted in lavender purple; beside it a smartphone propped up showing the same page small on its screen with an upload arrow; and a matte black desk microphone with a thin lavender ring, like the coffee counter card.
+
+Composition: objects arranged left to right, generous empty wall above for overlay, eye-level, shallow depth of field. Late afternoon light from the upper left. Calm, relieved mood. No people, no readable text or numbers, no logos, no insurer or hospital brand marks, no UI chrome.
