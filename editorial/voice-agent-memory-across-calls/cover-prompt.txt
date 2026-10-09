@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/returning-caller.webp in mahimai.ca, which currently holds the black-stage diagram as a placeholder.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light and leaf shadows, pale walnut desk, muted lavender accents.
+
+Subject: a private banker's desk. A closed leather client folder with a lavender ribbon tab, a fountain pen resting across a small card with blank ruled lines, a brass desk bell, a vintage desk telephone handset in matte black, and a matte black desk microphone with a thin lavender ring, like the coffee counter card.
+
+Composition: objects arranged left to right along the desk, generous empty wall above for overlay, eye-level, shallow depth of field. Late afternoon light from the upper left. Discreet, calm, trustworthy mood. No people, no readable text, no logos, no bank brand marks, no UI.

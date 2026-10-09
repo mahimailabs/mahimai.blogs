@@ -1,0 +1,21 @@
+"Last time you were sorting out the tuition wire. Did that land?"
+
+That sentence is why private banks pay relationship managers. A voice agent that starts every call from zero is the phone tree it replaced.
+
+Most teams add memory by saving the transcript. Six months later nobody can say what the agent knows about a client, why, or for how long.
+
+What we built instead:
+→ notes, not transcripts: one sentence each, with a kind and the reason it was kept
+→ consent asked at the moment something is worth keeping, and enforced where the data is stored
+→ the kind sets the expiry (a trip 3 days, an open task 7, a preference 30), never the model
+→ card numbers, PINs and ID numbers are refused before any write
+→ one summary after hang-up, from a job shutdown callback
+→ "forget that" deletes the text live and leaves a tombstone you can see
+
+The one I would copy first: put retention in a table in code. A table is something your privacy team can review. A prompt is not.
+
+Our playground has a fictional private bank that remembers you. Call once, hang up, call back.
+
+What does your agent remember about callers today, and could you explain why?
+
+https://mahimai.ca/blog/voice-agent-memory-across-calls
