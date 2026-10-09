@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/bilingual-311.webp in mahimai.ca, which currently holds a flat placeholder.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light and leaf shadows, pale marble or light wood desk, a sprig of lavender in a small ceramic pot, muted lavender accents.
+
+Subject: a city service desk. Two small paper speech-bubble cards propped on the desk, one plain cream, one edged in lavender, overlapping as if one conversation is turning into the other. A miniature orange traffic cone, a small sage-green recycling bin, and a matte black desk microphone with a thin lavender ring, like the coffee counter card.
+
+Composition: objects arranged left to right along the desk, generous empty wall above for overlay, eye-level, shallow depth of field. Morning light from the upper right. Calm, civic, welcoming mood. No people, no readable text or letters on the bubbles, no logos, no city crests, no UI.

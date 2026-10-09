@@ -1,0 +1,19 @@
+Your bilingual voice agent probably switches languages too often.
+
+Detecting the language is the easy part. Deepgram Nova-3 in multi mode tags every transcript with a language, in one stream.
+
+The hard part is deciding when that tag should change the call. English callers say "merci". French callers say "okay". A street name tags a whole sentence with the wrong language. Switch on every tag and the agent flips back and forth mid-call.
+
+So we put a small router between detection and everything else:
+→ the first words set the language
+→ a switch needs three words, or two short turns in a row
+→ low confidence never switches
+→ "can we do this in French?" always wins, through a tool call
+
+One prompt serves both languages, with a single per-turn line naming the language of service. The TTS voice changes at reply boundaries from the same decision. Tickets store category codes, not phrases, plus the language for the follow-up.
+
+You can call a made-up city 311 line and watch every decision on a panel beside the call.
+
+What does your agent do when a caller switches languages halfway through a sentence?
+
+https://mahimai.ca/blog/bilingual-voice-agent-language-switching

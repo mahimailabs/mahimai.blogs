@@ -1,0 +1,184 @@
+---
+title: 'Bilingual Voice Agent: When to Switch Languages'
+description: 'Build an English and French voice agent with LiveKit and Deepgram Nova-3 multi: detect language per utterance, decide when to switch, swap the voice.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'multilingual', 'deepgram', 'code-switching', 'government']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** Language detection is the easy part of a bilingual voice agent. Deepgram Nova-3 in `multi` mode tags every final transcript with a language in one stream. The hard part is deciding when that tag should change the language of service, because callers say "okay" in French and "merci" in English. Put that decision in a small router with a word threshold and a streak rule, let an explicit request always win, keep one prompt with a single per-turn language line, and swap the TTS voice from the same decision. You can call a made-up city 311 line below and switch mid-sentence.
+
+"Hi, there's a pothole on Main Street. Euh, en fait, c'est au coin de la 3e Avenue."
+
+That is a normal call in Ottawa, Montreal or Moncton. Residents start in one language, switch when the agent's first answer comes back, and drop single words from the other language all the time. A city, a bank or a utility that serves both languages cannot ask the caller to press 1 for English and then pin the whole call to that choice.
+
+This post walks through the [bilingual 311 demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/city-311) in awesome-voice-apps: a resident of the fictional City of Bellerive reports a pothole or asks about garbage day, in English or French, and the agent follows.
+
+## What "follows you" actually means
+
+A bilingual agent has four places where language lives, and they all have to agree:
+
+1. **What the STT expects.** A model locked to `en-US` turns "nid-de-poule" into "need a pool".
+2. **What the LLM answers in.** Given a mixed sentence, a model picks whichever language it feels like.
+3. **What the TTS voice sounds like.** An English voice reading French is understandable and immediately wrong.
+4. **What the record says.** The ticket needs one category code whatever language opened it, and it needs to remember which language the follow-up call should use.
+
+Most bilingual demos handle the first and hope the model sorts out the second. The interesting work is the decision that ties all four together.
+
+## One stream, a language per result
+
+Deepgram Nova-3 has a [code-switching mode](https://developers.deepgram.com/docs/multilingual-code-switching): set the language to `multi` and one stream transcribes several languages, returning a `languages` array per result, sorted by how many words each language contributed. The LiveKit Deepgram plugin copies the first entry into `SpeechData.language`, so the dominant language of each final transcript is already on the event your agent sees.
+
+```python
+def make_stt() -> deepgram.STT:
+    # `multi` is Nova-3's code-switching mode: one stream, a language per result.
+    # Deepgram recommends 100 ms endpointing for code-switching (default is 25).
+    return deepgram.STT(model="nova-3", language="multi", endpointing_ms=100)
+```
+
+The alternative is two STT streams and a language-ID model voting between them. That doubles your STT bill and adds a decision step before every transcript. For two languages that Nova-3 covers, a single `multi` stream is the simpler system.
+
+To act on the tag before the reply is generated, the agent overrides `stt_node` and reads every final transcript as it passes through:
+
+```python
+async def stt_node(self, audio, model_settings):
+    # Read the language tag on each final transcript before the turn ends,
+    # so the decision is in place when the reply is generated.
+    async for event in Agent.default.stt_node(self, audio, model_settings):
+        if event.type == stt.SpeechEventType.FINAL_TRANSCRIPT and event.alternatives:
+            heard = event.alternatives[0]
+            if heard.text.strip():
+                self.hear(heard.language, heard.text, heard.confidence)
+        yield event
+```
+
+Nothing is buffered or delayed. The events flow to the turn detector unchanged; the agent just looks at them on the way past.
+
+## Detection is not a decision
+
+Here is the trap. If you switch the language of service every time the detected language changes, the agent flips constantly:
+
+- An English caller says "merci" at the end. The agent replies in French.
+- A French caller says "okay" while thinking. The agent replies in English.
+- A street name ("rue Saint-Denis", "Northgate") tags a sentence with the wrong language.
+
+So the demo puts a small router between detection and everything else. Its rules:
+
+1. **The first words set the language.** No evidence threshold for the opening turn.
+2. **A switch needs a real sentence.** Three or more words in the new language at usable confidence switch the call.
+3. **Or a repeat.** Two short turns in a row in the new language also switch it. "Oui." then "D'accord." is a French speaker, even if each is one word.
+4. **Low confidence never switches.** Below 0.6 the call stays put.
+5. **Asking always wins.** "Can we do this in French?" is said in English, so detection alone would never switch it. The LLM calls a `set_language` tool and the router obeys.
+
+```python
+def hear(self, detected: object, text: str, confidence: float) -> dict:
+    lang = base_language(detected)
+    words = len(text.split())
+    decision = {"lang": lang or "?", "words": words, "confidence": round(confidence, 2),
+                "outcome": "same", "reason": ""}
+    if lang not in LANGUAGES:
+        decision.update(outcome="held", reason="not offered")
+    elif self.current is None:
+        self.current = lang
+        decision.update(outcome="start", reason="first words")
+    elif lang == self.current:
+        self._candidate, self._streak = None, 0
+    else:
+        self._streak = self._streak + 1 if self._candidate == lang else 1
+        self._candidate = lang
+        if decision["confidence"] < MIN_CONFIDENCE:
+            decision.update(outcome="held", reason="low confidence")
+        elif words >= MIN_WORDS or self._streak >= MIN_STREAK:
+            self._switch(lang)
+            decision.update(outcome="switch",
+                            reason=f"{words} words" if words >= MIN_WORDS else "twice in a row")
+        else:
+            decision.update(outcome="held", reason="too short")
+    decision["speaking"] = self.current or "en"
+    return decision
+```
+
+This is hysteresis, the same idea a thermostat uses so it does not click on and off around the set point. It is about forty lines of plain Python with no model in it, which means it has unit tests:
+
+```python
+def test_short_or_unsure_words_do_not_flip_the_call(self):
+    router = LanguageRouter()
+    router.hear("en", "Hi there, I want to report a pothole", 0.95)
+    self.assertEqual(router.hear("fr", "oui", 0.9)["reason"], "too short")
+    held = router.hear("fr", "il y a un trou énorme ici", 0.4)
+    self.assertEqual((held["outcome"], held["reason"]), ("held", "low confidence"))
+    self.assertEqual(router.speaking, "en")
+```
+
+The thresholds are a product decision, not a constant of nature. A Quebec-first line might start in French and require more evidence to leave it. A support line that mostly hears English might switch on a single strong sentence. Because the decision lives in one class, that is a one-line change you can test, not a prompt you have to re-tune.
+
+## One prompt, one language line
+
+The tempting design is two prompts, one per language. Six months later they disagree: the French one still says recycling is on Thursdays, or it lost the rule about reading ticket numbers digit by digit.
+
+The demo keeps a single English prompt that describes the job, the tools and the rules for both languages. Each turn, `on_user_turn_completed` adds one system line naming the language of service:
+
+```python
+def language_line(lang: str) -> str:
+    return f"Language of service: {LANGUAGES[lang]['reply']}. Reply only in that language."
+
+
+async def on_user_turn_completed(self, turn_ctx, new_message):
+    # One prompt for both languages; only this line changes per turn.
+    turn_ctx.add_message(role="system", content=language_line(self._router.speaking))
+```
+
+`turn_ctx` is the copy LiveKit builds for this generation, so the line applies to this reply and is not written into the conversation history. The French entry asks for Canadian French with Quebec vocabulary ("courriel", "fin de semaine"), which a general model will not default to.
+
+The tools follow the same principle. `report_issue` takes a category code (`pothole`, `missed_collection`), not a phrase, and its description tells the model that "nid-de-poule" is `pothole`. A ticket opened in French and one opened in English land in the same queue. The ticket stores the language of service, so the follow-up goes out in the language the resident chose.
+
+## The voice follows the same decision
+
+The last piece is the voice. The demo uses Cartesia Sonic 2 with a voice per language, and it updates the TTS options at the start of each reply from the router's current language:
+
+```python
+async def tts_node(self, text, model_settings):
+    self._sync_voice()
+    async for frame in Agent.default.tts_node(self, text, model_settings):
+        yield frame
+
+
+def _sync_voice(self) -> None:
+    lang = self._router.speaking
+    if lang != self._voice and self.tts is not None:
+        self.tts.update_options(voice=LANGUAGES[lang]["voice"], language=lang)
+        self._voice = lang
+```
+
+Doing it in `tts_node` rather than when the router switches matters: a switch can land while the previous reply is still being spoken. Changing the voice at reply boundaries means a sentence never changes voice halfway through.
+
+## Try it
+
+Sign in to use the short daily allowance across the playground demos. Everything is simulated: no ticket is filed and nothing is saved.
+
+<PlaygroundDemo demo="city311" />
+
+The panel beside the call shows each thing you say with the language heard, the transcript confidence and what the router decided. Things worth trying:
+
+- Start in English, then say "oui" on its own. The row reads "Held · too short" and the agent stays in English.
+- Say a full sentence in French. The row lights up as a switch, the voice changes and the next reply is in French.
+- Ask "can you help me in French?" in English. The `set_language` tool switches it, and the row reads "caller asked".
+- Report a pothole in French. The ticket shows "Nid-de-poule" and a French follow-up.
+- Ask for Spanish. The router holds ("not offered") and the agent says only English and French are available.
+
+## What this costs
+
+The bilingual version uses the same three providers as the English-only demos in the playground: one Deepgram stream, one LLM call per turn and one TTS stream. Nova-3 in `multi` mode is priced a little higher per minute than monolingual Nova-3 on [Deepgram's pricing page](https://deepgram.com/pricing), so check the current rate for your volume. There is no second STT stream, no separate language-ID model and no translation step, because the agent serves the caller in their language rather than translating between two people.
+
+## What this means for you
+
+1. **Separate detection from the decision.** Detection is a per-utterance signal. The language of service is call state. Put a router with explicit thresholds between them, and test it without a model.
+2. **Keep one prompt and one set of tools.** Change a single language line per turn and keep codes, not phrases, in your records. Two prompts drift.
+3. **Switch the voice at reply boundaries, from the same decision.** STT, LLM, TTS and the record should all read the router, so they can never disagree.
+
+The [bilingual 311 source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/city-311) runs with `uv sync` and `uv run python agent.py console` once you add LiveKit, Deepgram, OpenAI and Cartesia keys. The LiveKit docs on [pipeline nodes](https://docs.livekit.io/agents/logic/nodes/) cover `stt_node`, `tts_node` and `on_user_turn_completed`.
+
+If you serve customers in more than one language and your agent still asks them to press 1 or 2, language routing is one of the first things we look at in a [production readiness review](/contact).

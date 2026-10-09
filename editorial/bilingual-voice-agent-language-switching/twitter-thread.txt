@@ -1,0 +1,13 @@
+1/ Bilingual voice agents don't fail at language detection. They fail at deciding when to switch. "merci" from an English caller should not flip the call to French.
+
+2/ Detection: Deepgram Nova-3 with language=multi transcribes English and French in one stream and tags each result with its dominant language. The LiveKit plugin puts it on SpeechData.language.
+
+3/ Decision: a 40-line router. First words set the language. A switch needs 3+ words or two short turns in a row. Low confidence never switches. An explicit request ("in French please") always wins via a tool.
+
+4/ One prompt for both languages. Each turn adds one system line: "Language of service: Canadian French. Reply only in that language." Two prompts drift; one doesn't.
+
+5/ The Cartesia voice swaps in tts_node, at reply boundaries, from the same router. A sentence never changes voice halfway.
+
+6/ Records use codes, not phrases: nid-de-poule and pothole are both category=pothole, with the language of service stored for the follow-up.
+
+7/ Call the made-up Bellerive 311 line and watch each decision live: https://mahimai.ca/blog/bilingual-voice-agent-language-switching
