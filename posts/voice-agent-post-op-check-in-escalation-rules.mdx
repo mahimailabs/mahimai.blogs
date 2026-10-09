@@ -1,0 +1,242 @@
+---
+title: 'Post-Op Voice Agent: Escalate by Protocol, Not by Model'
+description: 'Build a post-surgery check-in voice agent with LiveKit where a rule table, not the LLM, decides when a patient goes to a nurse or to 911.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'healthcare', 'guardrails', 'tool-calling']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** A voice agent that calls patients after surgery must never decide on its own who gets a nurse. Split the job: the model asks questions and turns answers into typed tool calls; a rule table in plain code evaluates every answer, sets the escalation tier, and picks the next question. Emergency screens go first, a correction never clears a rule that fired, and the nurse gets a structured handoff built from the recorded answers. You can play the patient below and watch every rule fire.
+
+"It was 102 this morning. Actually, maybe 99. It's probably nothing."
+
+Every post-discharge call program hears a sentence like that. A good nurse hears the 102, not the "probably nothing". A language model, asked to judge, will often do the opposite: it is trained to be agreeable, and the patient just gave it permission to relax.
+
+Hospitals want automated follow-up calls because they scale: every knee replacement, every day-3 check. The first objection a clinical team raises is always some version of this: **who decides when the answer is a nurse callback or 911?** If your answer is "the model", the project ends there.
+
+This post walks through the [post-op check-in demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/postop-checkin) in awesome-voice-apps. A fictional hospital, Northfield General, calls a patient three days after a total knee replacement. The model talks. A rule table decides.
+
+## The split: the model extracts, code decides
+
+The protocol has five questions: breathing, calf, temperature, incision, pain. Each one gets its own tool, with typed arguments, so the model's only job is to turn speech into values:
+
+```python
+@function_tool()
+async def record_temperature(
+    self,
+    context: RunContext[dict],
+    reading: float | None,
+    unit: TempUnit,  # Literal["F", "C", "unknown"]
+    chills_or_sweats: bool,
+    patient_words: str,
+) -> str:
+    """Record the temperature reading, or null when they have none.
+
+    unit is F or C when the patient says it, otherwise unknown.
+    """
+    value = {"reading": reading, "unit": unit, "chills_or_sweats": chills_or_sweats}
+    return self._record(context, "temperature", value, patient_words)
+
+
+@function_tool()
+async def record_wound(
+    self,
+    context: RunContext[dict],
+    redness_spreading: bool,
+    drainage: Drainage,  # Literal["none", "clear", "spotting", "cloudy_or_pus"]
+    edges_opening: bool,
+    patient_words: str,
+) -> str:
+    """Record how the incision looks.
+
+    drainage: none, clear, spotting (a little blood), or cloudy_or_pus.
+    """
+    ...
+```
+
+LiveKit turns these signatures into strict OpenAI function schemas: `float | None` becomes `{"type": ["number", "null"]}`, a `Literal` becomes an `enum`, and every argument is required. The model cannot pass "kind of warm" as a temperature or invent a drainage category. It can only fill the form.
+
+There is no `escalate` tool. There is no `severity` argument. Nothing the model can call takes a judgement as input.
+
+`patient_words` is the one free-text field: a short quote of what the patient said. It decides nothing. It is there so that whoever reviews the call sees the words next to the value the model extracted.
+
+## The rule table
+
+The decisions live in a list a clinician can read:
+
+```python
+RULES: list[dict] = [
+    {"id": "E1", "step": "breathing", "tier": "emergency",
+     "when": "Chest pain or shortness of breath", "why": "possible blood clot in the lungs"},
+    {"id": "N1", "step": "calf", "tier": "nurse",
+     "when": "Calf pain, swelling or tenderness", "why": "possible blood clot in the leg"},
+    {"id": "N2", "step": "temperature", "tier": "nurse",
+     "when": "Temperature 101.5°F (38.6°C) or higher", "why": "fever after surgery"},
+    {"id": "N3", "step": "temperature", "tier": "nurse",
+     "when": "No reading, but chills or sweats", "why": "possible fever without a reading"},
+    {"id": "N4", "step": "wound", "tier": "nurse",
+     "when": "Cloudy or pus-like drainage", "why": "possible wound infection"},
+    {"id": "N5", "step": "wound", "tier": "nurse",
+     "when": "Redness spreading from the incision", "why": "possible wound infection"},
+    {"id": "N6", "step": "wound", "tier": "nurse",
+     "when": "Incision edges opening", "why": "wound separation"},
+    {"id": "N7", "step": "pain", "tier": "nurse",
+     "when": "Pain 8 or more and medication not helping", "why": "uncontrolled pain"},
+]
+```
+
+These thresholds belong to the fictional hospital, and they are not medical advice. In a real deployment this table is the artifact the clinical team signs off, versions, and audits. That is the point of pulling it out of the prompt: a prompt that says "escalate if the patient seems to have a fever" cannot be reviewed, tested, or diffed. A table with IDs can.
+
+Evaluation is ordinary Python:
+
+```python
+if step == "temperature":
+    reading, chills = value["reading"], value["chills_or_sweats"]
+    if reading is None:
+        summary = "No reading" + (", chills or sweats" if chills else ", no chills")
+        return True, summary, ["N3"] if chills else []
+    ok, f = to_fahrenheit(reading, value["unit"])
+    if not ok:
+        return False, f, []
+    c = round((f - 32) * 5 / 9, 1)
+    return True, f"{f:g}°F ({c:g}°C)", ["N2"] if f >= FEVER_F else []
+```
+
+`to_fahrenheit` handles the unit the patient did not say: nobody runs a 45-degree Fahrenheit fever, so a reading under 45 is Celsius. A reading outside a body-temperature range (Deepgram heard "1015") is rejected and the agent asks again, instead of firing or ignoring a rule on a nonsense value. Smart formatting on Deepgram Nova-3 helps here: "one oh one point eight" arrives as `101.8`.
+
+The tier is the most severe rule that fired:
+
+```python
+def tier(state: dict) -> Tier:
+    """The most severe rule that fired. No tool can lower it."""
+    worst = "routine"
+    for rule in fired_rules(state):
+        if TIER_RANK[rule["tier"]] > TIER_RANK[worst]:
+            worst = rule["tier"]
+    return worst
+```
+
+Every unit test in the demo runs this table without a model or a key. Thresholds are tested at the edges: 101.4 is routine, 101.5 fires N2, pain 8 with working medication is routine, pain 8 without fires N7.
+
+## The tool result is the script
+
+When a rule fires, the tool does not return `{"escalate": true}` and hope the model words it well. It returns what to say, and what not to:
+
+```python
+if "E1" in rules:
+    _close(state, "emergency")
+    return (
+        f"EMERGENCY: rule E1 fired. The check-in stops here. Say exactly: "
+        f'"{EMERGENCY_SCRIPT}" Ask nothing else.'
+    )
+...
+for rule_id in rules:
+    rule = RULE_BY_ID[rule_id]
+    said.append(f"Rule {rule_id} fired ({rule['when'].lower()}).")
+if said:
+    said.append(
+        "Tell them in one short sentence that you are flagging this for the nurse. "
+        "Do not reassure or advise."
+    )
+nxt = current_step(state)
+if nxt:
+    said.append(f"Next ask: {STEP_BY_ID[nxt]['ask']}")
+```
+
+Two things happen in that return value. The emergency path gets a fixed script: "Chest pain or trouble breathing after surgery needs emergency care. Please hang up and call 911 now." A sentence like that should be written once, reviewed by a clinician, and never paraphrased by a model on the fly.
+
+And the next question comes from the protocol, not from the model's sense of where the conversation is going. If the patient volunteers their pain score while answering about breathing, the agent records both, and the protocol still asks about the calf next.
+
+## Emergency screens first
+
+The question order is deliberate:
+
+```python
+# Emergency screens first, as nurse triage protocols do: a patient with chest
+# pain should not answer four questions about their incision before hearing 911.
+STEPS = [breathing, calf, temperature, wound, pain]
+```
+
+Telephone triage protocols written for nurses put the emergency questions at the top for the same reason. A natural-sounding agent would open with "how's the pain?", because that is the friendly question. The protocol opens with the dangerous one.
+
+Once E1 fires, the check-in is closed. Every later `record_*` call returns the 911 script again, nothing else is stored, and `finish_check_in` cannot turn it back into a routine call. The panel greys out the questions that were never asked.
+
+## A correction never clears a rule
+
+Back to "102. Actually, maybe 99." Patients correct themselves, and the agent should record the correction. What it should not do is let the correction erase the escalation:
+
+```python
+previous = state["answers"][step]
+# A correction is recorded, never erased: a rule that fired stays fired, and
+# the nurse sees the earlier answer. Mistakes fail toward a callback.
+observed = dict(previous["observed"]) if previous else {}
+for rule_id in rules:
+    observed.setdefault(rule_id, summary)
+state["answers"][step] = {
+    "value": value,
+    "summary": summary,
+    "was": previous["summary"] if previous else "",
+    "quote": _clip(words),
+    "rules": [r["id"] for r in RULES if r["id"] in observed],
+    "observed": observed,
+}
+```
+
+This is the design choice I would argue for hardest with a client. A sticky rule has two failure modes. If the first reading was a speech recognition error, a nurse makes one unnecessary call. If the correction was the patient talking themselves out of it, the sticky rule is the only thing standing between a fever and a missed infection. One of those costs is much bigger, so the system fails toward the callback.
+
+The same principle explains why there is a `start_over` tool, and why it refuses until the outcome is final. It is a demo control so you can try another path. It is not a way to wipe a red flag mid-call.
+
+## The handoff the nurse actually reads
+
+When the outcome is a nurse callback, the agent does not summarise the call. Code builds an SBAR note (Situation, Background, Assessment, Recommendation, the handoff structure hospitals already train on) from the recorded answers:
+
+```python
+def handoff(state: dict) -> dict:
+    """An SBAR note built from the answers, so the nurse never re-asks."""
+    p = state["patient"]
+    fired = fired_rules(state)
+    answered = [s for s in STEPS if state["answers"][s["id"]]]
+    return {
+        "situation": "; ".join(f"{r['why'].capitalize()} (rule {r['id']})" for r in fired),
+        "background": (
+            f"{p['name']}, {p['procedure'].lower()}, surgery {p['surgery_date']} with "
+            f"{p['surgeon']}, post-op day {p['day']}."
+        ),
+        "assessment": [_assess(s, state["answers"][s["id"]]) for s in answered],
+        "recommendation": (
+            "Patient told to call 911. Care team to follow up after the emergency visit."
+            if tier(state) == "emergency"
+            else "On-call orthopedic nurse to call back today."
+        ),
+    }
+```
+
+A model-written summary would be shorter and friendlier, and it could drop the one line that matters. This note cannot. Every answered question appears, the rule IDs are in the situation line, and a corrected answer shows both values: "Temperature: 99.6°F (37.6°C), earlier 102.2°F (39°C)".
+
+## Try it
+
+Sign in to use the short daily allowance across the playground demos. You play the patient. The hospital, the patient chart and the protocol are made up, and nothing here is medical advice.
+
+<PlaygroundDemo demo="postop" />
+
+Things worth trying, because they are where check-in agents break:
+
+- Say your temperature was 102, then say "actually it was 99, it's nothing". N2 stays fired, and the panel keeps both readings.
+- Answer the first question with "my chest feels a bit tight". The call stops on E1 and the remaining questions are never asked.
+- Say you have no thermometer but you have had the chills. N3 fires without a number.
+- Ask the agent whether your fever is serious. It does not reassure you; it says the nurse can help with that.
+- Answer two questions in one breath. Both are recorded, and the protocol still picks the next question.
+- Ask it to wrap up after two questions. `finish_check_in` refuses and lists what is missing.
+
+## What this means for you
+
+1. **Take judgement out of the tool surface.** If a tool takes `severity` or `should_escalate` as an argument, the model is deciding. Give it typed facts to extract and let code decide.
+2. **Make the rules an artifact.** A table with IDs can be signed off, versioned and tested at its thresholds. A sentence in a prompt cannot.
+3. **Fail toward the human.** Sticky rules, emergency questions first, and fixed scripts for the moments that matter cost a few unnecessary callbacks. That is the trade a clinical team will accept.
+
+The same split works anywhere a voice agent sits in front of a regulated decision: insurance triage, fraud holds, utility shut-off calls. The [post-op check-in source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/postop-checkin) runs with `uv sync` and `uv run python agent.py console` once you add Deepgram, OpenAI, Cartesia and LiveKit keys, and the protocol tests need no keys at all.
+
+If you are putting a voice agent in front of patients or customers and need to show a reviewer exactly when it escalates, that is what we check in a [production readiness review](/contact).
