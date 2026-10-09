@@ -1,0 +1,159 @@
+---
+title: 'LiveKit Avatar Agents: Keep the Face in Sync'
+description: 'Put a lip-synced video avatar on a LiveKit voice agent: the avatar as its own participant, interruptions that stop the face, and how to measure sync.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'avatars', 'anam', 'interruptions']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** A video avatar on a LiveKit agent is not a skin on the voice. It is a second participant in the room that receives your agent's audio and publishes its own audio and video. That moves three things you used to get for free: interruptions now have to stop someone else's face, the transcript has to be cut where that face stopped, and latency gains a stage you have to measure. You can talk to a concierge built this way below, cut it off mid-sentence, and watch the numbers.
+
+A hotel lobby at 1 a.m. has a bell, an empty desk and a guest who wants dinner. "The concierge never sleeps" is the pitch for putting a talking face on a screen there, and in a bank branch, a clinic waiting room or a car dealership showroom.
+
+The pitch sells itself. The engineering is where most avatar demos fall apart: the face keeps talking for half a second after you interrupt it, the lips lag the voice on a slow network, or the agent "remembers" saying a sentence the guest never heard. This post walks through the [hotel concierge demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/hotel-concierge) in awesome-voice-apps, built on LiveKit Agents 1.8.5 and an [Anam](https://anam.ai) avatar, and the patterns that keep the face honest.
+
+## The avatar is a participant, not a renderer
+
+The intuitive picture is a pipeline: STT, LLM, TTS, then a box that turns audio into a face. LiveKit's [avatar integration](https://docs.livekit.io/agents/models/avatar/) does something different. The avatar provider runs its own worker that **joins the room as a separate participant**. Your agent streams its TTS audio to that participant, and the avatar publishes synchronized audio and video to the caller.
+
+So a call now has three participants: the caller, your agent and the avatar. Your agent publishes no audio of its own. The avatar's token carries an `lk.publish_on_behalf` attribute naming your agent, which is how a frontend knows that face belongs to that agent.
+
+Why route it this way instead of rendering frames inside your worker? Because lip sync is decided where audio and video are muxed. If the avatar publishes both tracks, they leave the same process with the same clock, and WebRTC keeps them aligned at the caller. If your worker published the audio and the avatar published the video, every jitter difference between two paths would show up on the lips.
+
+Wiring it up is short. The avatar starts before the session, so the session's audio output is already pointed at it:
+
+```python
+from livekit.plugins import anam
+
+session = AgentSession(
+    userdata=initial_state(),
+    stt=openai.STT(),
+    llm=openai.LLM(model="gpt-4o-mini"),
+    tts=openai.TTS(voice="coral"),
+    vad=ctx.proc.userdata["vad"],
+)
+await ctx.connect()
+
+avatar = anam.AvatarSession(
+    persona_config=anam.PersonaConfig(name="Mira", avatarId=os.environ["ANAM_AVATAR_ID"]),
+    avatar_participant_name="Mira",
+)
+# Replaces the session's audio output with a byte stream to the avatar.
+await avatar.start(session, room=ctx.room)
+# Without this, the greeting plays as audio before there is a face.
+await avatar.wait_for_join()
+
+await session.start(agent=HotelConcierge(ctx.room), room=ctx.room)
+```
+
+`avatar.start()` asks Anam to start a session with a LiveKit token it mints for the avatar, then swaps the agent's audio output for a `DataStreamAudioOutput` that sends audio frames to the avatar's identity over a LiveKit byte stream. `wait_for_join()` blocks until the avatar has joined and published video, with a 30 second default timeout.
+
+Our playground runs every demo in one shared worker, and we put a 15 second timeout on that wait. If the avatar does not arrive, the call ends before any model or voice is billed. A voice that talks to a blank tile is worse than no call.
+
+## Interruptions now stop someone else's face
+
+In a voice-only agent, an interruption is local. VAD hears the caller, the session stops TTS, and the audio track goes quiet. With an avatar, the audio you need to stop is already in another process's buffer, being turned into mouth shapes.
+
+LiveKit handles this with RPCs between the agent and the avatar worker:
+
+| RPC | Direction | What it does |
+| --- | --- | --- |
+| `lk.clear_buffer` | agent to avatar | Drop queued audio and stop the face now |
+| `lk.playback_started` | avatar to agent | The first frame actually played |
+| `lk.playback_finished` | avatar to agent | Playback ended, with the position reached and whether it was interrupted |
+
+The second half matters more than it looks. When the caller cuts in, the agent does not know how much of its sentence was heard. It only knows how much it sent. `lk.playback_finished` carries the **playback position**, so the session truncates the assistant's message in the chat history at the point the face stopped. Without it, the model believes it said "and they have a table at nine, but the kitchen closes at" when the guest heard "and they have a table at nine". The next turn then builds on words that never reached anyone.
+
+This is the bug I check for first in avatar agents: interrupt mid-sentence, then ask "what did you just say?" If the answer includes words the face never spoke, the transcript is being cut at the sender, not at playback.
+
+## What a concierge actually needs to do
+
+The face sells the demo. The tools make it useful. The concierge has three, all over a per-call copy of tonight's tables at six made-up restaurants:
+
+```python
+@function_tool()
+async def recommend(
+    self,
+    context: RunContext[dict],
+    craving: str | None = None,
+    max_walk_minutes: int | None = None,
+) -> str:
+    """Find restaurants near the hotel with a table tonight."""
+    data = context.userdata
+    picks = [r for r in data["restaurants"] if r["times"]]
+    if craving:
+        matched = [r for r in picks if _match(r, craving)]
+        picks = matched or picks
+    ...
+    publish_picks(self.room, data, picks, f"for {craving}" if craving else "")
+```
+
+`book_table` accepts only a time that tool returned, a party of 1 to 8 and a name, removes that slot, and returns a confirmation code. `cancel_table` puts the slot back. The same rule as every tool-driven agent we build: **the screen changes only when a tool says so**, never because the model said a sentence that sounded like a booking.
+
+One avatar-specific note in the prompt: the concierge reads the confirmation code back "slowly". A face makes guests trust what they hear more, so a misheard code costs more. On a production system I would also spell codes through a TTS text transform rather than trusting the model to pace them.
+
+## Measure the face, not just the voice
+
+Voice agents are usually measured as STT, then LLM time to first token, then TTS time to first byte. An avatar adds a stage after TTS, and it is invisible in those numbers. LiveKit emits `AvatarMetrics` on the session's `metrics_collected` event with two timings:
+
+- **Join latency:** avatar session start to the avatar's video track arriving in the room.
+- **Playback latency:** first audio frame sent to the avatar until its playback starts.
+
+Interruption timing is not in those metrics, so the demo measures it from session state: the moment the caller starts speaking while the agent is speaking, to the moment the agent leaves the speaking state.
+
+```python
+class SyncMeter:
+    def attach(self, session: AgentSession) -> None:
+        session.on("metrics_collected", self._on_metrics)
+        session.on("agent_state_changed", self._on_agent_state)
+        session.on("user_state_changed", self._on_user_state)
+
+    def _on_user_state(self, event) -> None:
+        if event.new_state == "speaking" and self._agent_state == "speaking":
+            self._talked_over_at = time.monotonic()
+
+    def _on_agent_state(self, event) -> None:
+        self._agent_state = event.new_state
+        if event.old_state != "speaking" or self._talked_over_at is None:
+            return
+        stopped_after = time.monotonic() - self._talked_over_at
+        self._talked_over_at = None
+        # A reply that simply ended while the caller spoke is not an interruption.
+        if stopped_after <= INTERRUPT_WINDOW:
+            self.stats["interruptions"] += 1
+            self.stats["stop_ms"] = round(stopped_after * 1000)
+            self.publish()
+```
+
+Be honest about what that number includes. "Caller starts speaking" fires after VAD has heard enough speech to count, so it starts late, and the stop is the agent's state change, not the last frame on the caller's screen. It is a lower bound on what the guest feels. It is still the right number to watch, because it moves when you change VAD settings, the avatar provider or the network path.
+
+All three numbers go to the browser as a `Sync` UI event, so the panel beside the face shows them during the call.
+
+## Try it
+
+Ask the concierge where to eat. Ask for something quiet, then cut it off halfway through its answer and change your mind. Book a table and watch the panel.
+
+<PlaygroundDemo demo="concierge" />
+
+Everything is simulated: the hotel, the restaurants and the booking are made up, and the face is an AI avatar.
+
+## What it costs to run
+
+An avatar changes the cost shape of a call. Speech, model and voice are billed by usage. Anam bills avatar session time, and the meter runs from the moment you request the avatar, including the seconds it takes to join and any silence while the guest thinks. ⚠ VERIFY: check the per-minute rate on your Anam plan before quoting it; we bill it to the call at a configurable rate.
+
+Our playground meters every provider per call against a budget. For this demo that meant two changes: the worker reports avatar seconds as their own cost line, billed by the started second, and the reservation floor for an avatar call is higher than for a voice-only one. The room also needs room for three participants instead of two, and we size that per demo rather than raising it for every call.
+
+On the LiveKit side, a 2-minute call now carries a video track as well as audio, so bandwidth goes up. If you are running avatars at volume, this is the line that grows fastest after the avatar itself.
+
+## What this means for you
+
+1. **Treat the avatar as a participant in your design.** Count it in room limits, give it its own failure path (end or fall back to voice if it does not join), and make your frontend pick its tracks by `lk.publish_on_behalf`, not by "the first agent".
+2. **Test interruptions against the transcript, not the audio.** Interrupt mid-sentence, then ask the agent what it just said. If it repeats words the face never spoke, playback position is not reaching your chat history.
+3. **Add join and playback latency to your dashboards.** They sit after TTS and do not show up in the STT, LLM and TTS numbers you already track. A slow avatar region looks exactly like a slow model to your users.
+
+The [hotel concierge source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/hotel-concierge) runs with `uv sync` and `uv run python agent.py dev` once you add LiveKit, OpenAI and Anam keys. The [LiveKit avatar docs](https://docs.livekit.io/agents/models/avatar/) list every supported provider, and the [Anam plugin guide](https://docs.livekit.io/agents/models/avatar/plugins/anam/) covers avatar setup and director notes.
+
+If you are putting a face on an agent that customers will talk to in a lobby, a branch or an app, interruption handling and the transcript it leaves behind are among the first things we check in a [production readiness review](/contact).

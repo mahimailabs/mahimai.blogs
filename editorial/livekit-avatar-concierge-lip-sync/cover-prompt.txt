@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/hotel-concierge.webp in mahimai.ca, which currently holds a flat placeholder in the style of clinic-scheduler.webp.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light and leaf shadows, pale marble or light wood desk, a sprig of lavender in a small ceramic pot, muted lavender accents.
+
+Subject: a hotel lobby concierge desk at night. A slim upright display on a stand shows a friendly, softly lit face mid-sentence (illustrated, not photoreal, not a real person), with a faint lavender glow around the screen edge. Beside it a brass service bell, a small folded reservation card with a lavender check mark, a room key on a leather tag, and a matte black desk microphone with a thin lavender ring, like the coffee counter card.
+
+Composition: objects arranged left to right along the desk, the display slightly left of centre, generous empty wall above for overlay, eye-level, shallow depth of field. Warm lamp light from the left, deep blue night through a window on the right. Calm, welcoming mood. No readable text, no logos, no hotel brand marks, no UI chrome.
