@@ -1,8 +1,8 @@
-"Where does the patient's voice go?"
+"Where does the participant's voice go?"
 
-That one question stalls most voice agent pilots in Canadian healthcare. A cloud region dropdown does not answer it. Three vendors still see every call: speech to text, the model, and the voice.
+That one question stalls most voice agent pilots at Canadian research hospitals. A cloud region dropdown does not answer it. Three vendors still see every call: speech to text, the model, and the voice.
 
-So we built a check-in line for a fictional hospital where all three run on one GPU server we control:
+So we built a clinical trial check-in line for a fictional research hospital where all three run on one GPU server we control:
 → faster-whisper for speech to text, served by speaches
 → Qwen3-4B on vLLM for the model and its tool calls
 → Kokoro-82M for the voice
@@ -12,7 +12,7 @@ The part buyers care about: every model client goes through a transport that cou
 
 It is not free. Whisper waits until you stop talking, so speech to text is slower than streaming cloud STT. The GPU bills by the hour whether anyone calls. Someone has to run it. The demo shows the latency next to the cloud numbers so you can judge.
 
-Call the line and say your pain is an eight.
+Call the line, say you went to the ER last week, and hear it flagged for the study coordinator.
 
 Which part of your voice stack would procurement ask about first?
 

@@ -1,5 +1,5 @@
 16:9, 1600x900. No text in the image.
 
-A calm editorial illustration: a single dark server cabinet with three glowing slots stands inside a softly drawn dashed boundary on a white, Apple-like product backdrop. One slot glows a muted violet (#6f3fb0). A small studio microphone sits just inside the boundary; a hospital clipboard with a simple red cross leans against the cabinet. Outside the boundary, faint grey cloud shapes drift away, with no lines connecting them to anything inside.
+A calm editorial illustration: a single dark server cabinet with three glowing slots stands inside a softly drawn dashed boundary on a white, Apple-like product backdrop. One slot glows a muted violet (#6f3fb0). A small studio microphone sits just inside the boundary; a study diary clipboard with a simple red cross and a small pill bottle lean against the cabinet. Outside the boundary, faint grey cloud shapes drift away, with no lines connecting them to anything inside.
 
 Style: flat vector with gentle shading, generous negative space, hairline strokes, matching the existing mahimai.ca playground card art (warm off-white wall, light desk line). Lighting soft and even, mood quiet and trustworthy. Palette: white, warm greys, near-black, a single violet accent, one small red cross.

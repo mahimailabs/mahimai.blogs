@@ -1,15 +1,15 @@
 ---
 title: 'Private Voice Agent: Self-Hosted STT, LLM and TTS'
-description: 'A hospital voice agent where Whisper, Qwen3 and Kokoro run on one GPU server you control. Count every byte, prove zero reach AI providers, and see the cost.'
+description: 'A clinical trial voice agent where Whisper, Qwen3 and Kokoro run on one GPU server you control. Count every byte, prove zero reach AI providers, see the cost.'
 pubDate: 2026-10-09
 author: 'Mahimai Raja J'
-tags: ['voice-agents', 'self-hosted', 'healthcare', 'data-residency', 'livekit', 'vllm']
+tags: ['voice-agents', 'self-hosted', 'healthcare', 'clinical-trials', 'data-residency', 'livekit', 'vllm']
 draft: false
 ---
 
 import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
 
-> **TL;DR:** When a hospital or public agency asks "where does the patient's voice go?", a cloud region dropdown is a weak answer. You can run the whole speech loop (faster-whisper for speech to text, Qwen3 on vLLM for the model, Kokoro for the voice) on one GPU server behind a single OpenAI-compatible endpoint, point LiveKit's OpenAI plugin at it, and wrap every client in a transport that counts bytes by host. The panel below shows the count live: zero bytes to AI providers. It costs you some latency, a fixed GPU bill and an operations job. Here is the code and the tradeoff.
+> **TL;DR:** When a research hospital asks "where does the participant's voice go?", a cloud region dropdown is a weak answer. You can run the whole speech loop (faster-whisper for speech to text, Qwen3 on vLLM for the model, Kokoro for the voice) on one GPU server behind a single OpenAI-compatible endpoint, point LiveKit's OpenAI plugin at it, and wrap every client in a transport that counts bytes by host. The panel below shows the count live: zero bytes to AI providers. It costs you some latency, a fixed GPU bill and an operations job. Here is the code and the tradeoff.
 
 "Before we go further: where does the audio go, who can read the transcript, and is any of it stored outside Canada?"
 
@@ -17,7 +17,9 @@ That question ends a lot of voice agent pilots in Canadian healthcare and govern
 
 The rules behind the question are real. In Nova Scotia, the [Personal Information International Disclosure Protection Act](https://novascotia.ca/just/iap/piidpaquest.asp) requires public bodies to keep personal information stored and accessed only in Canada, with narrow exceptions. Quebec's Law 25 allows transfers out of the province but requires a [privacy impact assessment](https://cloud.google.com/security/compliance/quebeclaw25) first. Neither is legal advice for your case, but both explain why "it is in a US region of a vendor you have a DPA with" does not close the conversation.
 
-There is a cleaner answer: the models run on a server you control, and you can show that nothing else is called. This post walks through the [private health line demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/private-health-line) in awesome-voice-apps, which does exactly that for a fictional hospital's post-surgery check-in line.
+There is a cleaner answer: the models run on a server you control, and you can show that nothing else is called. This post walks through the [private health line demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/private-health-line) in awesome-voice-apps, which does exactly that for a fictional Canadian research hospital's clinical trial check-in line.
+
+Trials are where the question bites hardest. A weekly call to a participant collects missed doses, new symptoms, emergency visits and new medications: health data tied to an experimental drug, which the sponsor, the research ethics board and the participant's consent form all have opinions about. It is also the call you most want to automate, because a coordinator phoning forty participants a week is the bottleneck, and a missed adverse event matters. Under Canada's [Food and Drug Regulations](https://laws-lois.justice.gc.ca/eng/regulations/C.R.C.,_c._870/section-C.05.014.html), a sponsor has to report serious, unexpected adverse drug reactions to Health Canada on a deadline.
 
 ## Why a residency checkbox is not enough
 
@@ -155,9 +157,10 @@ Sign in to use the short daily allowance across the playground demos. Use made-u
 
 Things worth trying:
 
-- Say your pain is an eight. The tool records `8/10`, flags it, and tells the model not to reassure you.
-- Describe the wound as "clean, but a bit red". The validator picks the warning word over the reassuring one.
-- Give your temperature as "thirty-eight point four". Anything at 38 C or above is a flag.
+- Say you went to the emergency room last week. The tool records it, flags a possible serious adverse event for the study coordinator, and tells the model not to reassure you or guess at a cause.
+- Describe a rash as "mild, maybe moderate". The validator records the worse word. Severe is a flag.
+- Say you missed two doses. Two or more missed doses in a week is a flag, because adherence decides whether the data counts.
+- Ask whether the rash is from the study drug. The agent will not say: that is the coordinator's call, and the instructions forbid it.
 - Ask "where does my voice go?" The agent answers from its instructions; the panel answers from the ledger.
 - Watch the model server's byte counts. Speech to text sends the most (your audio, as WAV), voice receives the most (its audio, as PCM), and the language model moves a few kilobytes of text.
 
@@ -172,7 +175,7 @@ For an end-to-end residency claim, every hop that touches audio or text runs in 
 3. **The model server**, the same `compose.yaml` on a GPU host in a Canadian data centre or on-premises.
 4. **Egress rules** that make the ledger redundant: the worker's network policy allows LiveKit and the model server and nothing else. The counter shows it working; the firewall makes it true.
 
-Recording, transcripts and the check-in result then land in systems the hospital already governs. Nothing in the agent needs to change between the playground and this layout; only the URLs do.
+Recording, transcripts and the diary entries then land in systems the hospital already governs, such as its electronic data capture system for the trial. Nothing in the agent needs to change between the playground and this layout; only the URLs do.
 
 ## What private costs
 
@@ -184,10 +187,10 @@ Recording, transcripts and the check-in result then land in systems the hospital
 
 ## What this means for you
 
-- **If you sell voice agents to Canadian healthcare or government**, have a self-hosted answer ready before procurement asks. A demo with a zero on screen is worth more than a slide of vendor DPAs.
-- **Start with structured calls.** Check-ins, intake, reminders and triage forms are where a 4B model with validated tools is good enough today. Keep open-ended conversation on a larger model or wait for faster open stacks.
+- **If you sell voice agents to Canadian hospitals, research sites or government**, have a self-hosted answer ready before procurement asks. A demo with a zero on screen is worth more than a slide of vendor DPAs.
+- **Start with structured calls.** Trial diaries, check-ins, intake and reminders are where a 4B model with validated tools is good enough today. Keep open-ended conversation on a larger model or wait for faster open stacks.
 - **Measure, then decide.** Run the same script against your cloud stack and your self-hosted one, compare the per-stage times, and price the GPU against your real volume.
 
 If you are weighing a self-hosted voice stack for a regulated deployment, the architecture, the hops and the latency budget are what we work through in a [production readiness review](/contact).
 
-Sources: [speaches](https://speaches.ai), [vLLM tool calling](https://docs.vllm.ai/en/latest/features/tool_calling.html), [Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507), [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), [LiveKit self-hosting](https://docs.livekit.io/home/self-hosting/deployment/), [Nova Scotia PIIDPA FAQ](https://novascotia.ca/just/iap/piidpaquest.asp), [Quebec Law 25 overview](https://cloud.google.com/security/compliance/quebeclaw25).
+Sources: [speaches](https://speaches.ai), [vLLM tool calling](https://docs.vllm.ai/en/latest/features/tool_calling.html), [Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507), [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), [LiveKit self-hosting](https://docs.livekit.io/home/self-hosting/deployment/), [Food and Drug Regulations C.05.014](https://laws-lois.justice.gc.ca/eng/regulations/C.R.C.,_c._870/section-C.05.014.html), [Nova Scotia PIIDPA FAQ](https://novascotia.ca/just/iap/piidpaquest.asp), [Quebec Law 25 overview](https://cloud.google.com/security/compliance/quebeclaw25).
