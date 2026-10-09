@@ -1,0 +1,255 @@
+---
+title: 'Voice Agent Cancellation: Policy as Code, Not Prompt'
+description: 'Build a fair cancel line with LiveKit: one retention offer, a spoken disclosure, screened speech and a turn deadline enforced by code, not the prompt.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'guardrails', 'compliance', 'subscriptions']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** A retention agent on a cancel line has a conflict of interest built in: the business wants to keep the subscriber, and the rules say the subscriber must be able to leave. Do not settle that conflict in the prompt. Put the rules in a small policy engine that runs around the model: code hears "cancel", code picks the one offer, code speaks the required disclosure, code drops sentences that pressure the caller, and code cancels and reads the confirmation number when the clock runs out. You can try to talk your way past it below.
+
+"Before you go, I can do seventy percent off for a year."
+
+That is the sentence a retention agent will eventually say if all that stands between it and a discount is a paragraph of instructions. Somebody on the call pushes, the model wants to be helpful, and the offer that legal approved becomes the offer the model invented. On the next call it asks "are you sure?" three times, because the prompt said retention matters.
+
+Cancel lines are where voice agents meet regulation head on. This post walks through the [fair cancellation demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/fair-cancellation) in awesome-voice-apps, a cancel line for a made-up streaming service, and the pattern underneath it: **policy as code that guardrails the model, instead of a prompt you hope it follows.**
+
+## The rules are moving into state law
+
+In the US, the FTC's 2024 "click to cancel" amendments to the Negative Option Rule were [vacated by the Eighth Circuit](https://www.cooley.com/news/insight/2025/2025-07-11-click-to-cancel-just-got-cancelled-eighth-circuit-vacates-entirety-of-ftcs-negative-option-rule) on July 8, 2025, on procedural grounds, days before most of it took effect. The state laws did not go anywhere. California's AB 2863 amended the state's automatic renewal law for contracts entered into, amended or extended on or after July 1, 2025, and [according to King & Spalding's summary](https://ktslaw.com/en/insights/alert/2024/10/california-latest-automatic-renewal-law-amendments-take-effect-in-july-2025) it allows a discount or other benefit during a phone cancellation only if the consumer is told they can cancel at any time by saying "cancel". It also requires that the business not obstruct or delay the cancellation.
+
+That is a voice-specific rule, and it reads like a spec. "Tell them they can say cancel" is a string that must be spoken. "Do not obstruct or delay" is a bound on how many turns you take. "A discount or other benefit" is a thing you can count. None of it should depend on how a language model feels on a given call.
+
+This is not legal advice, and the demo's numbers (one offer, three turns) are product choices, not statutory ones. The point is the architecture: when rules look like this, they belong in code you can test and log.
+
+## Seven rules, one engine
+
+The demo's policy lives in `policy.py`, a module with no LiveKit and no network. Every rule has an id, and every decision it makes is written to a log the caller can see:
+
+| Rule | What code does |
+| --- | --- |
+| `CANCEL.INTENT` | Hears "cancel" on every caller turn and starts the clock |
+| `OFFER.MATCH` | Allows at most one offer, chosen from the caller's reason |
+| `OFFER.DISCLOSE` | Speaks "you can say cancel at any time" before the offer |
+| `OFFER.CONSENT` | Applies an offer only on a clear yes in the caller's own words |
+| `SPEECH.SCREEN` | Drops pressure lines and unapproved deals before TTS |
+| `CANCEL.DEADLINE` | Cancels on a decline, or three caller turns after the request |
+| `CANCEL.CONFIRM` | Reads the confirmation number itself, one character at a time |
+
+The model still does the talking. It asks why the caller is leaving, phrases the offer, and says goodbye. It just does not get to decide anything a regulator would ask about.
+
+## Code hears "cancel", not the model
+
+The first rule is the one most agents get wrong without noticing. If the model is responsible for recognising a cancel request, then the clock starts whenever the model decides it heard one. A model with a retention prompt has every incentive to hear "I'm thinking about cancelling" as an invitation to sell.
+
+LiveKit Agents gives you a hook that runs after every finished user turn and before the LLM: [`on_user_turn_completed`](https://docs.livekit.io/agents/logic/nodes/). The demo runs the policy there:
+
+```python
+async def on_user_turn_completed(
+    self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage
+) -> None:
+    # The policy hears every finished caller turn before the model does.
+    state = self.session.userdata
+    text = new_message.text_content or ""
+    state["last_caller"] = text[:500]
+    must_cancel = policy.observe_caller(state, text)
+    if must_cancel:
+        policy.cancel(state, by="policy")
+    publish_cancel(self.room, state)
+    if must_cancel:
+        # The model gets no turn: code speaks the cancellation and its number.
+        self.session.say(policy.take_script(state), allow_interruptions=False)
+        publish_cancel(self.room, state)
+        raise StopResponse()
+```
+
+`observe_caller` counts turns, records the turn the caller first asked to cancel, and decides whether this turn ends the conversation:
+
+```python
+def observe_caller(state: dict, text: str) -> bool:
+    """Run on every finished caller turn, before the model. True means cancel now."""
+    if state["outcome"]:
+        return False
+    state["turn"] += 1
+    if state["intent_turn"] is None:
+        if wants_cancel(text):
+            state["intent_turn"] = state["turn"]
+            _log(...)
+        return False
+    offer = _open_offer(state)
+    if offer and (wants_cancel(text) or _DECLINE.search(text)):
+        offer["status"] = "declined"
+        state["declined"] = True
+        _log(state, "CANCEL.DEADLINE", "enforce", "Offer declined. Policy cancels now.")
+        return True
+    if offer and says_yes(text):
+        # A late yes still wins: the model applies the offer they asked for.
+        return False
+    if turns_left(state) == 0:
+        _log(...)
+        return True
+    return False
+```
+
+The interesting line is the last part of the hook. When the policy decides the call is over, it raises `StopResponse`, which tells the session not to generate a reply for this turn, and speaks the cancellation with `session.say`. That is plain TTS, no LLM request at all. The model cannot argue with a turn it never gets. `allow_interruptions=False` means the caller hears the confirmation number to the end even if they talk over it.
+
+The intent detector is a regular expression with a negation check ("don't cancel, I just need a password reset" does not start the clock). A regex will miss phrasings a model would catch. That trade is deliberate: a missed "cancel" falls back to the model, which can still call `cancel_membership`, while a false start of the clock only means the agent cancels a little sooner. In production I would pair it with the STT's final transcript and log every miss for review, but I would not move the trigger into the prompt.
+
+## One offer, chosen by code
+
+The model can ask for "the offer". It can never name one. Offers are data, keyed by the reason the caller gives:
+
+```python
+OFFERS: dict[str, dict | None] = {
+    "price": {
+        "id": "half_off",
+        "label": "50% off for 3 months",
+        "spoken": "half price for the next three months",
+    },
+    "not_watching": {
+        "id": "pause",
+        "label": "Pause free for 2 months",
+        "spoken": "a free two-month pause, with nothing charged and your profiles kept",
+    },
+    "switching": None,
+    "other": None,
+}
+```
+
+The `None` entries are a product decision worth copying: if someone is switching to a competitor, a half-price offer is noise, so the policy sends them straight to the cancel. The tool the model calls enforces the rest:
+
+```python
+def make_offer(state: dict) -> str:
+    """The one retention offer, if the policy allows it. Returns the tool result."""
+    if state["outcome"]:
+        return "blocked: the call already has an outcome. Do not pitch anything."
+    if state["intent_turn"] is None:
+        _log(state, "OFFER.MATCH", "block", "Offer refused: the caller never asked to cancel.")
+        return "blocked: the caller has not asked to cancel. Do not pitch offers."
+    if len(state["offers"]) >= MAX_OFFERS or state["declined"]:
+        _log(state, "OFFER.MATCH", "block", "Second offer refused. One fair offer per call.")
+        return "blocked: the one offer is used. Call cancel_membership now."
+    ...
+    state["offers"].append({"id": offer["id"], "label": offer["label"], "status": "offered"})
+    state["due"].append("disclosure")
+    _log(state, "OFFER.MATCH", "pass", f"Offer approved: {offer['label']} (1 of {MAX_OFFERS}).")
+    return (
+        f"approved: {offer['spoken']}. The policy already tells the caller they can say "
+        "cancel at any time. Offer it in one sentence, then ask if they want it or still "
+        "want to cancel. No other deals and no pressure."
+    )
+```
+
+Note what a blocked result does. It does not just say no; it tells the model the next legal move ("call cancel_membership now"). Tools that only refuse leave the model to improvise, and improvising is what you were trying to prevent.
+
+Acceptance gets the same treatment. `accept_offer` takes no arguments from the model. It reads the caller's last transcribed words and refuses unless they contain a clear yes and no cancel request:
+
+```python
+def accept_offer(state: dict, caller_said: str) -> str:
+    offer = _open_offer(state)
+    if not offer or state["outcome"]:
+        return "blocked: there is no open offer to accept."
+    if not says_yes(caller_said):
+        _log(state, "OFFER.CONSENT", "block", "Acceptance refused: no clear yes from the caller.")
+        return "blocked: the caller has not clearly said yes. Ask once: keep the offer, or cancel?"
+    ...
+```
+
+If the model decides "hmm, maybe" means yes, the subscriber does not get quietly re-enrolled. That is the failure that turns into a chargeback, then a complaint.
+
+## Required words are spoken by code
+
+The disclosure and the confirmation number are the two sentences that must come out exactly right. So the model never writes them. The policy queues them, and the agent's [TTS node](https://docs.livekit.io/agents/logic/nodes/) puts them in front of whatever the model says next:
+
+```python
+async def tts_node(self, text: AsyncIterable[str], model_settings: ModelSettings):
+    state = self.session.userdata
+
+    async def spoken() -> AsyncIterable[str]:
+        # Required words first, from code. Then the model, one screened sentence
+        # at a time, so a dropped line never reaches the voice.
+        script = policy.take_script(state)
+        if script:
+            publish_cancel(self.room, state)
+            yield script + " "
+        buffer = ""
+        async for chunk in text:
+            ready, buffer = policy.split_sentences(buffer + chunk)
+            for sentence in ready:
+                kept = policy.screen(state, sentence)
+                if kept:
+                    yield kept
+                else:
+                    publish_cancel(self.room, state)
+        if buffer:
+            kept = policy.screen(state, buffer)
+            if kept:
+                yield kept
+            else:
+                publish_cancel(self.room, state)
+
+    async for frame in super().tts_node(spoken(), model_settings):
+        yield frame
+```
+
+When `make_offer` approves, the reply that follows the tool call starts with "Before I mention anything else: you can say cancel at any time and I will." The log records `OFFER.DISCLOSE` as spoken by code. You can show an auditor that line and the code path that produced it, rather than a prompt and a hope.
+
+The confirmation number follows the same path. References use a twelve-character alphabet with no zero, one, O, I, B or D, and are read one character at a time ("C, X. 4, K, 7. A, R, 9"), the same idea as spelling codes in the [pharmacy refill demo](/blog/voice-agent-pharmacy-refill-exact-capture).
+
+## Screen every sentence before the voice
+
+The second half of that TTS node is an output guardrail. The model's text is buffered into sentences, and each one passes `screen` before it reaches Cartesia:
+
+```python
+def screen(state: dict, sentence: str) -> str:
+    """Drop a sentence that pressures the caller or pitches a deal the policy did not
+    approve. Returns the sentence to speak (empty when dropped)."""
+    if not sentence.strip():
+        return sentence
+    rule = None
+    if state["intent_turn"] is not None and _PRESSURE.search(sentence):
+        rule = "Dropped a pressure line"
+    elif _PITCH.search(sentence) and not _approved(state, sentence):
+        rule = "Dropped an unapproved offer"
+    if not rule:
+        return sentence
+    _log(state, "SPEECH.SCREEN", "block", f"{rule}: “{sentence.strip()[:90]}”")
+    return ""
+```
+
+"You'll lose your watch history", "are you sure", "last chance": dropped once the caller has asked to cancel. A sentence pitching a discount, a pause or a credit: dropped unless the policy approved an offer, and even then any percentage in it must match the approved one. The model saying "or seventy percent off" while the approved offer is fifty is exactly the drift this catches.
+
+Two honest limits. A pattern list is not a classifier, and a determined model can phrase pressure in words the list does not know; in a real deployment I would add a small, fast classifier behind the same `screen` interface and keep the patterns as the floor. And sentence buffering adds latency: the first audio waits for the first full stop. On a cancel line, a few hundred milliseconds is a good trade for never saying the wrong offer out loud. On a latency-critical line you would screen clauses instead.
+
+## The clock is the backstop
+
+Everything above can fail politely: the model can keep asking clarifying questions, the caller can say "hmm" three times. The cancel clock is what guarantees the call ends. Three caller turns after the first cancel request, `observe_caller` returns true, and the hook cancels with no model involved. On the panel you watch the three segments fill, then the state flip to "Cancelled by the policy".
+
+Three turns is generous for this flow: ask why, offer, decide. A real deployment would set the number with whoever owns compliance and track how often the deadline fires. If it fires often, your offer script is too long, and that is a product finding, not a model problem.
+
+## Try it
+
+Sign in to use the short daily allowance across the playground demos. The account on screen is made up for each call, and nothing is charged.
+
+<PlaygroundDemo demo="cancel" />
+
+Things worth trying:
+
+- Say you want to cancel because it is too expensive, then say no to the offer. The policy cancels without another model turn.
+- Ask for a better deal. Any sentence with an unapproved number is dropped before it is spoken, and the log shows it.
+- Say you are switching to another service. No offer applies, so the agent goes straight to the cancel.
+- Stall with "let me think" a few times. Watch the clock run out.
+- Say "maybe" to the offer. It is not applied until you clearly say yes.
+
+## What this means for you
+
+1. **Separate talking from deciding.** Let the model handle conversation. Anything a regulator, an auditor or a chargeback would ask about belongs in a module you can unit test without a model. The demo's policy has twelve tests and none of them need a key.
+2. **Use the pipeline hooks, not the prompt, to enforce.** `on_user_turn_completed` with `StopResponse` lets code take a turn away from the model. The TTS node lets code speak required words and veto sentences.
+3. **Log decisions, not transcripts.** The compliance log records which rule fired and why, turn by turn. That is the artifact you hand to legal, and it never needs the raw audio.
+
+The [fair cancellation source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/fair-cancellation) runs with `uv sync` and `uv run python agent.py console` once you add Deepgram, OpenAI, Cartesia and LiveKit keys.
+
+If your agent sits on a retention, billing or collections line, guardrails like these are among the first things we check in a [production readiness review](/contact).
