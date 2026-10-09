@@ -1,0 +1,13 @@
+1/ "Last time you were sorting out the tuition wire. Did that land?" Cross-call memory turns a voice agent into a concierge. Done badly, it is a liability nobody can explain. Here is how we built it for a demo private bank.
+
+2/ Keep notes, not transcripts. One sentence each, with a kind (preference, task, context) and the reason it was kept. The reason is what you show a client who asks "why do you know that?"
+
+3/ Ask for consent when something is worth keeping, not in the greeting. Then enforce it where the data is stored. The prompt makes the agent polite. The store makes it safe.
+
+4/ The model picks the kind. The kind picks the expiry: a trip 3 days, an open task 7, a preference 30. Retention is a table in code, not a vibe in a prompt.
+
+5/ Card numbers, PINs and ID numbers are refused before any write, and shown masked under "not kept". Blunt rules plus a cap of eight notes beat one clever classifier.
+
+6/ One summary after hang-up, from a LiveKit job shutdown callback so the worker waits for it. "Forget that" deletes the text live and leaves a tombstone.
+
+7/ Call our demo bank twice and watch the file change, with the code: https://mahimai.ca/blog/voice-agent-memory-across-calls

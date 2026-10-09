@@ -1,0 +1,184 @@
+---
+title: 'Voice Agent Memory Across Calls, With Consent'
+description: 'Give a LiveKit voice agent memory between calls: consent first, a reason and an expiry on every note, a post-call summary, and a forget that works live.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'agent-memory', 'privacy', 'financial-services']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** Cross-call memory makes a voice agent feel like a concierge instead of a phone tree, and it is also the fastest way to build a liability. Treat memory as a client file, not a transcript: ask before keeping anything, store short notes with a reason, let the kind of note set its expiry, write one summary after the call, and make "forget that" delete the text on the spot. You can call our demo bank twice below and watch the file change.
+
+"Last time you were sorting out the tuition wire. Did that land?"
+
+That one sentence is why private banks pay relationship managers. Nobody wants to explain their situation again, and a voice agent that starts every call from zero feels like exactly the phone tree it replaced. So teams bolt on memory: save the transcript, embed it, retrieve it next time. Six months later someone asks what the agent knows about a client, why it knows it, and how long it keeps it, and nobody can answer.
+
+This post walks through the [returning caller demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/returning-caller) in awesome-voice-apps: a fictional private bank, Corvel Private, whose concierge line remembers you between calls. Five decisions do the work, and the policy lives in a file you can test without a model.
+
+## Memory is a client file, not a transcript
+
+The first decision is what to keep. Not the transcript. A transcript is everything the caller said, including the card number they read out by mistake, and it is useless as context: two minutes of small talk to find one fact.
+
+Keep notes instead. Each one is a single sentence, written by the model through a tool, with a kind and a reason:
+
+```json
+{"id": "m2d7a44", "kind": "task", "text": "Owed a callback on the tuition wire.",
+ "why": "Their advisor confirms it went out.", "saved": 1760000000,
+ "expires": 1760604800, "forgotten": null, "by": null}
+```
+
+Three kinds cover a concierge line: **preference** (prefers a text over a call), **task** (something still owed to the client) and **context** (a time-bound fact, like a trip). The reason is not decoration. It is what you show the client when they ask "why do you know that?", and it is what stops the model from writing down everything.
+
+The tool the model calls is small:
+
+```python
+@function_tool()
+async def remember(self, context: RunContext[dict], kind: NoteKind, note: str, why: str) -> str:
+    """Keep one short note for the client's next call. Needs consent first.
+
+    Args:
+        kind: preference, task (something still open) or context (time-bound fact).
+        note: one third-person sentence, like "Flying to Lisbon on the 20th."
+        why: how it helps next time, like "So the card is not flagged abroad."
+    """
+```
+
+`NoteKind` is a `Literal`, so the model cannot invent a kind, and the tool returns what happened ("kept as m9b03f1 for 3 days") so the agent can say it.
+
+## Consent first, and the server checks it too
+
+The agent asks before it keeps anything, at the moment something is worth keeping: "Want me to keep that on file for your next call?" Asking in the greeting is worse. The caller has no idea what you would keep, so the yes means nothing.
+
+Asking is the prompt's job. Enforcing it is not. Every write goes through one function that refuses without consent on file:
+
+```python
+def add(entries: list[dict], kind: str, text: str, why: str, now: float) -> list[dict]:
+    """Return the file with one more entry. Raises ValueError with the reason if refused."""
+    if kind not in TTL:
+        raise ValueError(f"unknown kind {kind}")
+    ...
+    if kind == "summary":
+        text = scrub(text)
+    elif reason := screen(text):
+        raise ValueError(f"never kept: {reason}")
+    entries = expire(entries, now)
+    if kind != "consent" and not consent(entries, now):
+        raise ValueError("no consent on file")
+    if kind in NOTE_KINDS and len(notes(entries, now)) >= MAX_ACTIVE:
+        raise ValueError("the client file is full; forget something first")
+    ...
+    entry = {..., "saved": int(now), "expires": int(now) + TTL[kind], ...}
+    return [*entries, entry]
+```
+
+In the hosted playground the file lives in our site's database, not in the agent worker, and the site runs the same checks again. The worker never sees who the caller is. It names its reservation, and the site resolves the account from it, only for a claimed call of this demo, and only until shortly after the call ends. If the model is talked into writing something it should not, two layers say no.
+
+## Expiry comes from the kind, never from the model
+
+The model picks the kind. The kind sets the expiry:
+
+```python
+TTL = {
+    "consent": 30 * DAY,
+    "summary": 30 * DAY,
+    "preference": 30 * DAY,
+    "task": 7 * DAY,
+    "context": 3 * DAY,
+}
+```
+
+A trip is useful for days. A preference for weeks. Letting the model choose ("keep this for a year, it seems important") turns retention into a vibe. A table is something your privacy team can review, and it maps directly onto what Canada's PIPEDA and the GDPR both ask for: a stated purpose and a retention limit for personal information.
+
+The numbers in the demo are short on purpose. In production you would set them per product with legal, and the point stands: one table, in code, not in the prompt.
+
+Expired notes become tombstones. The text and the reason are deleted, and the record that something existed stays, with when and why it went. That is what lets the panel say "deleted because it expired" instead of silently shrinking.
+
+## Some things are never kept
+
+A caller will say things no file should hold. The agent refuses them before any write:
+
+```python
+NEVER_KEPT = (
+    (re.compile(r"\d(?:[\s.-]?\d){5,}"), "account, card or phone numbers"),
+    (re.compile(r"\b(pins?|passwords?|passcodes?|security (?:questions?|answers?)|"
+                r"one[- ]time (?:code|password)|otp|cvv|cvc)\b", re.IGNORECASE), "credentials"),
+    (re.compile(r"\b(sin|ssn|social (?:insurance|security)(?: number)?|passport number|"
+                r"driver'?s licen[cs]e number)\b", re.IGNORECASE), "government ID numbers"),
+)
+```
+
+A note that matches is not stored, and the panel shows it under "not kept" with the number masked, so the caller sees the refusal happen. The rule is deliberately blunt. "Wire of 40,000 to the university" passes, "card 4520 1234 5678 9012" does not. A regex will not catch everything, which is why the second layer matters: a cap of eight notes per caller, one sentence each, and a model instruction to never try. Defence in depth beats one clever classifier.
+
+## One summary, written after the call
+
+Notes capture what the model decided mattered during the call. A summary captures where the call ended. It is one small LLM request after hang-up, only with consent, and only the latest one is kept:
+
+```python
+async def summarize(lines: list[str]) -> tuple[str, int, int]:
+    """Two sentences for the next call. Returns the text and the token usage."""
+    async with AsyncOpenAI(max_retries=0, timeout=6) as client:
+        response = await client.chat.completions.create(
+            model=SUMMARY_MODEL,
+            max_completion_tokens=90,
+            store=False,
+            messages=[
+                {"role": "system", "content": SUMMARY_PROMPT},
+                {"role": "user", "content": "\n".join(lines)[-6000:]},
+            ],
+        )
+    ...
+```
+
+The timing is the hard part. When the caller hangs up, the room is deleted and the job starts shutting down. The summary has to finish inside that window, so it runs from a job shutdown callback (`ctx.add_shutdown_callback`), which the worker waits for, with a six second timeout on the request. The hosted copy also stops the agent speaking first, writes the summary while the reservation still accepts writes, and bills the request itself, because the metering layer only sees the session's own models.
+
+Number runs are masked in the summary before it is stored, for the same reason as the notes: the transcript it was written from can contain anything.
+
+## Forget that, live
+
+"Forget that" is a tool call, not a promise:
+
+```python
+@function_tool()
+async def forget(self, context: RunContext[dict], memory_id: str) -> str:
+    """Delete one note the client asked you to forget, by its id."""
+```
+
+The ids are in the instructions at the start of the call, so the model can name the note the caller means:
+
+```
+Client file, from earlier calls (verified by caller ID):
+ Last call: Client is travelling to Lisbon on October 20 and asked for a travel notice.
+ Notes, by id:
+ [m9b03f1] context: Flying to Lisbon on October 20.
+ [m2d7a44] task: Owed a callback on the tuition wire.
+```
+
+Forgetting deletes the text and the reason in the same write, and the panel updates before the agent confirms it. Withdrawing consent forgets everything: a client who says "stop remembering me" should not have to list what to delete. Between calls the visitor can delete notes from the page too, which goes through the same function on the site.
+
+The file is loaded once, before the greeting, with `update_instructions`. That keeps the per-turn cost flat: no retrieval call in the latency path, no vector store, and a context block of a few hundred tokens at most. For a concierge line with eight notes per client, retrieval is the wrong tool. You need it when the history is large and the question decides what is relevant. Here the file is small and all of it is relevant.
+
+## Try it
+
+Sign in to use the short daily allowance across the playground demos. Nothing real happens on the call, and notes you agree to keep can be deleted from the page at any time.
+
+<PlaygroundDemo demo="recall" />
+
+Call twice. The daily allowance fits a long first call and a short second one.
+
+- On the first call, mention a trip and how you like to be contacted. Say yes when it asks to keep a note, and watch each note appear with its reason and expiry.
+- Read out a made-up card number. It lands under "not kept", masked.
+- Hang up. A few seconds later the summary appears in the file.
+- Call back and ask "where were we?". The greeting picks up from the summary.
+- Say "forget the trip". The note becomes a tombstone while the agent is still talking.
+
+## What this means for you
+
+1. **Write memory as notes with a reason, not transcripts.** If your agent cannot say why it knows something, neither can you when a client or a regulator asks.
+2. **Put retention in a table in code.** Let the model choose a kind, and let the kind choose the expiry. Tombstone what expires so deletions are visible.
+3. **Enforce consent and redaction where the data is stored**, not only in the prompt. The prompt makes the agent polite; the store makes it safe.
+
+The [returning caller source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/returning-caller) runs with `uv sync` and `uv run python agent.py console` once you add Deepgram, OpenAI, Cartesia and LiveKit keys. It keeps its file in `.memory/`, so the second console run remembers the first, and its unit tests need no keys at all.
+
+If you are adding memory to an agent that talks to customers, what it keeps, for how long and how it forgets are among the first things we check in a [production readiness review](/contact).
