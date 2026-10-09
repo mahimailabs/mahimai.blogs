@@ -1,0 +1,13 @@
+1/ Your speech recognizer already knows which word a learner mispronounced. Deepgram returns a confidence per word. We built a speaking coach on that signal alone. How it works:
+
+2/ Keep every final word and its confidence until the turn ends. One sentence read aloud often arrives as two or three final segments, so score per turn, not per segment.
+
+3/ Align what was heard against the target line. Each word is clear, close, weak, heard as something else ("sink" for "think"), or missed. Accent-insensitive, so "seches" is not a French mistake.
+
+4/ Score in code, coach with the model. The LLM never hears audio, so it cannot judge pronunciation. It gets one line: these two words, this tip, ask for just these.
+
+5/ No keyterm boosting. Bias the recognizer toward "think" and it hears "think" when the learner said "sink".
+
+6/ Drill the weak words, re-read the whole line, and move the level from the first read, not the re-read.
+
+7/ Try it in English or French, with the code: https://mahimai.ca/blog/pronunciation-scoring-voice-agent-word-confidence

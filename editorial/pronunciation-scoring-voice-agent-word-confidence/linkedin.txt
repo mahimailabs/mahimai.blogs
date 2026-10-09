@@ -1,0 +1,19 @@
+"Great job! Your pronunciation is improving."
+
+Most speaking practice features say that whatever you said. The learner says "I sink it is Thursday" and gets a thumbs up, or a 72 with no idea which word cost them.
+
+Your speech recognizer already knows. Deepgram returns a confidence for every word, and a word it had to guess comes back low.
+
+How our speaking coach demo uses that:
+→ line the heard words up against the sentence the learner was asked to read
+→ score every word in code: clear, close, weak, heard as something else, or missed
+→ hand the LLM only the one or two weakest words to coach, and forbid it from inventing others
+→ have the learner re-read the line, then move the level from the first read
+
+The detail I would copy first: no keyterm boosting on the STT. Bias the recognizer toward "think" and it will hear "think" when the learner said "sink". The error you wanted to catch disappears.
+
+It is live in our playground in English and French. Say "sink" on purpose and watch it get drilled.
+
+If you build learning products, what does your speaking mode grade today: the word or the sentence?
+
+https://mahimai.ca/blog/pronunciation-scoring-voice-agent-word-confidence
