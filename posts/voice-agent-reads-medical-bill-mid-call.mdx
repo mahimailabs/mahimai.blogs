@@ -1,0 +1,183 @@
+---
+title: 'A Voice Agent That Reads Your Medical Bill Mid-Call'
+description: 'Send a document into a live LiveKit call with byte streams, read it once into a strict schema, let code find the errors, and ground every amount the agent says.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'vision', 'healthcare', 'byte-streams', 'grounding']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** When a caller needs to show your voice agent a document, send it into the call itself on a LiveKit byte stream: no upload endpoint, no bucket, no link. Then do not put the picture in the voice model's context. Read it once with a vision model into a strict schema, check the arithmetic in plain code, and make the agent fetch a line (which highlights it on screen) before it can say any amount. Our demo reads a bill in 2 to 3.4 seconds for about a tenth of a cent, and it never does its own math. Try it below.
+
+"I got a bill for almost two thousand dollars for an MRI. My insurance said they paid. I don't understand any of these columns."
+
+Health plans hear this all day. Billed, allowed, plan paid, you owe, a remark code and a CPT code on every line, and the member has the paper in front of them while the agent on the phone does not. Most voice agents answer this call by asking the member to read the bill aloud, one column at a time, which is slow for the member and error prone for the transcript. Numbers are the worst thing to put through speech recognition.
+
+The fix is obvious: let the member show the agent the bill. This post walks through the [medical bill explainer demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/medical-bill-explainer) in awesome-voice-apps, member services for Kestrel Health, a made-up plan, and the three decisions that make it something you could put in front of real members.
+
+## The file travels inside the call
+
+The usual way to get a document to an agent is a side channel: an upload endpoint, a storage bucket, a signed URL, and then some way to tell the agent the file exists. That is four moving parts, a second authentication story, and a copy of a medical document sitting in storage that someone now has to delete.
+
+LiveKit already has a reliable data channel between the member's app and the agent. [Byte streams](https://docs.livekit.io/transport/data/byte-streams/) put files on it: the browser calls `sendFile` with a topic, and the agent registers a handler for that topic. The file goes to the agent that is talking, and nowhere else.
+
+On the page, the member picks a sample or a photo, and we shrink it on the device before it leaves:
+
+```tsx
+const jpeg = await toJpeg(await (await fetch(choice.url)).blob()); // max 1600 px, re-encoded
+await room.localParticipant.sendFile(new File([jpeg], 'bill.jpg', { type: 'image/jpeg' }), {
+  topic: 'bill-upload',
+  mimeType: 'image/jpeg',
+  destinationIdentities: [agent.identity], // only the agent gets it
+  compress: false,
+  onProgress: (value) => setProgress(value),
+});
+```
+
+Re-encoding through a canvas does two jobs. A 12-megapixel phone photo becomes a few hundred kilobytes, and the photo's EXIF block, which can include where it was taken, never leaves the phone.
+
+The agent side is where most examples stop too early. The [LiveKit images guide](https://docs.livekit.io/agents/multimodality/vision/images/) shows a handler that reads the stream and adds the image to the chat context. That is the right minimal example and the wrong production code, because it trusts every stream that arrives. Ours checks who sent it, what it claims to be, and how big it really is:
+
+```python
+async def _receive(self, reader: rtc.ByteStreamReader, identity: str) -> None:
+    sender = self.room.remote_participants.get(identity)
+    info = reader.info
+    problem = None
+    if sender is None or sender.kind == rtc.ParticipantKind.PARTICIPANT_KIND_AGENT:
+        problem = "unknown sender"
+    elif self._busy:
+        problem = "Still reading the last bill. Send the next one after."
+    elif self._uploads >= MAX_UPLOADS:
+        problem = f"This call reads up to {MAX_UPLOADS} bills."
+    elif info.mime_type not in UPLOAD_TYPES or (info.size or 0) > MAX_UPLOAD_BYTES:
+        problem = "Send a JPEG, PNG or WebP photo under 4 MB."
+    if problem:
+        reader.close()
+        ...
+    data = bytearray()
+    async for chunk in reader:
+        data += chunk
+        if len(data) > MAX_UPLOAD_BYTES:  # the declared size can lie
+            reader.close()
+            raise ValueError("too large")
+```
+
+Then Pillow decodes it as an image (anything else is rejected), shrinks it, and re-encodes it as JPEG, so the bytes that reach the model are an image we produced, not whatever the client sent.
+
+Two permissions details matter on a shared playground. The visitor's LiveKit token for every other demo cannot publish data at all; only this demo's token can, and it is still microphone-only for media. And the agent publishes its first status event only after the handler is registered, so the page waits for it before sending. Send too early and the stream arrives at an agent with no handler, and it is silently dropped.
+
+## Read it once, into a schema
+
+Here is the decision that matters most. If you follow the minimal example and put the image in the chat context, the voice model looks at the bill on every turn for the rest of the call. That has three costs:
+
+1. **Every request carries the image.** Each reply re-sends roughly a thousand or more image tokens, and a bigger prompt means a slower first token, on every turn, in a product where first-token latency is the thing callers feel.
+2. **The model does arithmetic.** Ask "why do I owe this much?" and a voice model will happily subtract allowed from billed in its head. Sometimes it is right.
+3. **Nothing is checkable.** There is no record of what the model believed line 3 said, so when it is wrong you cannot tell a misread from a bad explanation.
+
+Instead, one vision request turns the photo into data, the moment it arrives:
+
+```python
+VISION_PROMPT = (
+    "You read a US medical bill or explanation of benefits from a photo. Copy what is "
+    "printed; never calculate, infer or fix a number. ..."
+)
+
+response = await self._vision.chat.completions.create(
+    model="gpt-4.1-mini",
+    store=False,
+    max_completion_tokens=1200,
+    response_format=VISION_SCHEMA,  # strict: date, code, billed, allowed, plan_paid, you_owe, remark
+    messages=[
+        {"role": "system", "content": VISION_PROMPT},
+        {"role": "user", "content": [{"type": "image_url", "image_url": {"url": url, "detail": "high"}}]},
+    ],
+)
+```
+
+"Copy what is printed; never calculate" is doing real work. A vision model that sees a total that does not add up will often quietly fix it. We want the error, so the prompt forbids fixing, and the schema has a slot for every printed column.
+
+On our three sample bills, `gpt-4.1-mini` copied every line exactly: 11 lines, 44 amounts, no misreads. Each read took 2.1 to 3.4 seconds and used about 1,570 to 1,750 input tokens and 200 to 320 output tokens, a bit over a tenth of a cent at published prices. These are clean, typed samples; a crumpled photo under a kitchen light will do worse, and that is what the "send a flatter, closer photo" path is for.
+
+While the read runs, the agent says "Got it. Reading your bill now." with `session.say(..., add_to_chat_ctx=False)`, and the panel shows a scan line over the bill. Three seconds of silence on a call feels broken; three seconds of "reading it now" feels like service.
+
+The output is then bounded before anyone trusts it. `normalize()` clips every string, caps the bill at 12 lines, turns each amount into cents with `Decimal`, and replaces anything that is not a sane amount (negative, NaN, a billion dollars) with zero. A vision model's JSON is input, not truth.
+
+## Code finds the errors
+
+A billing advocate's first pass is arithmetic, and arithmetic belongs in code:
+
+```python
+def audit(bill: dict) -> list[dict]:
+    findings = []
+    seen = {}
+    for line in bill["lines"]:
+        key = (line["date"], line["code"].upper(), line["billed"])
+        if line["code"] and key in seen:
+            findings.append({"kind": "duplicate", "lines": [line["id"]], "of": seen[key],
+                             "amount": line["you_owe"]})
+        else:
+            seen[key] = line["id"]
+        share = line["allowed"] - line["plan_paid"]
+        if bill["network"] == "in" and line["allowed"] > 0 \
+                and line["you_owe"] - max(share, Decimal(0)) > TOLERANCE:
+            findings.append({"kind": "balance_billed", "lines": [line["id"]],
+                             "amount": line["you_owe"] - max(share, Decimal(0))})
+    ...  # plus: the printed total does not match the sum of the lines
+```
+
+The three samples each carry one lesson:
+
+| Sample | What is on it | What the checks say |
+| --- | --- | --- |
+| Urgent care explanation of benefits | The same blood count, same code, same day, twice | Duplicate on line 4, $4.26 |
+| MRI statement from an in-network imaging center | You owe $1,954.00 on a scan the plan allowed at $1,120.00 and paid $896.00 | Over the allowed amount by $1,730.00 |
+| Physical therapy explanation of benefits | The plan paid $0 on every line | Nothing wrong: it went to the deductible |
+
+The third sample is the one we care about most. An agent that finds a problem on every bill is worse than useless, because members stop believing it. The clean bill has to come back clean, and an explanation ("the plan paid nothing because these went toward your deductible") is the right answer.
+
+The balance-billing check only runs when the document says the provider is in-network. An in-network provider has agreed to the plan's allowed amount, so the member's share is at most allowed minus plan paid. Out of network, that rule does not hold in general, and the agent should not pretend it does.
+
+## Every amount comes from a highlighted line
+
+The voice model never sees the image, and it does not see the amounts either. After a read, its context gets a short note:
+
+```
+Bill 1 is on the member's screen: Explanation of benefits from Brightwater Urgent Care,
+in-network. Lines: L1 09/14/2026 99214 Office visit...; L4 09/14/2026 85025 Complete blood
+count (CBC). Checks found: duplicate on L4. No amounts are listed here: call show_lines
+(use TOTAL for the totals) before stating any amount.
+```
+
+To say a number, the model has to call `show_lines`, which returns that line's figures, any finding on it, and plain definitions of billed, allowed, plan paid and you owe. The same call sends a UI event that lights the line up on the member's screen. So the line the agent is talking about is always the line the member is looking at, and every dollar figure it speaks came from a tool result you can log.
+
+The dispute tool closes the loop. `open_dispute` only accepts lines a check flagged; try to dispute a clean line and it returns "Those lines passed every check, so there is nothing to dispute. Explain why the amount is right instead." We tested this in text-only sessions against `gpt-4o-mini`: asked "can you dispute the contrast line too?", it looked the line up, said the $12.80 was correct for the allowed amount, and offered to dispute only the MRI.
+
+One prompt detail earned its place in testing. An early version said "before you state an amount, call show_lines", and the model, having seen line 4 once, stopped calling it, so the highlight lagged the conversation. "Every time you talk about a line, call show_lines for it first, even if you saw it before" fixed both the highlight and the grounding.
+
+## Inside the call
+
+Pick a sample bill (or upload a made-up one, never a real one), start the call, and ask about it. "Why am I paying for a blood test twice?" works on the urgent care bill; "why do I owe almost two thousand dollars?" on the MRI.
+
+<PlaygroundDemo demo="bill" />
+
+The panel shows the bill you shared, every line the agent read with what it owes, a flag on anything the checks found, and the line the agent is explaining, expanded into its four columns. Disputes appear with their reference number. On the playground the vision request is billed to your call alongside speech and language, since VoiceGateway meters the voice pipeline but never sees a direct vision request; the hosted agent adds each read's token usage to the call's cost record itself.
+
+## Where it falls short
+
+Real bills are messier than ours. Multi-page statements, remark codes explained on page two, adjustments on their own line, and photos taken at an angle all lower read quality. A production version would send each page, use a document-specific prompt per payer layout, and ask the member to confirm the total it read before explaining anything.
+
+The checks are also only a start. A real plan would match the bill against its own claim record, which is far more reliable than reading a provider's statement, and add rules for preventive care billed with cost sharing, out-of-network emergency care, and coordination of benefits. The pattern does not change: the model reads and explains, code decides.
+
+And this is health data. The demo writes nothing to disk, sends images with `store=False`, and asks visitors to use samples. A real deployment needs a provider agreement that covers health information before the first photo arrives.
+
+## What this means for you
+
+1. **Use byte streams for anything the caller needs to show you mid-call.** Validate the sender, type and real size in the handler, and only open the permission for the agents that need it.
+2. **Read a document once, into a schema.** Do not leave the image in the voice model's context. You get faster turns and a record of what was read that you can test.
+3. **Make the model fetch facts before it says them.** Keep amounts out of the context, return them from a tool, and tie that tool to what the user sees. Grounding becomes a property of the code, not a hope about the prompt.
+
+The [medical bill explainer source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/medical-bill-explainer) runs with `uv sync` and `uv run python agent.py dev` with OpenAI, Deepgram, Cartesia and LiveKit keys; `send_bill.py` sends a sample into a running call.
+
+If your agents need to read what callers are holding (bills, claims, prescriptions, invoices), how the document gets in and what the model is allowed to say about it are exactly what we look at in a [production readiness review](/contact).
