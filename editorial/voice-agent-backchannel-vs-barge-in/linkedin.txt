@@ -1,0 +1,20 @@
+"So your payment would go from two thousand and seven..."
+"Mm-hm."
+"Sorry, did you have a question?"
+
+People nod out loud. A voice agent running on voice activity detection hears "mm-hm" as a request for the floor, stops mid-sentence and replies to a nod. Tune it the other way and it talks straight through "wait, stop".
+
+What we did instead, without LiveKit Cloud's adaptive model:
+→ raise min_words so audio alone never pauses the agent
+→ score every overlap from the interim transcript
+→ only acknowledgement words: keep talking
+→ any other word, even one: session.interrupt()
+→ no words at all: a cough, ignore it
+
+The part most teams miss: when the agent is cut off, LiveKit keeps only the words the caller heard in the chat history. Never keep your own copy from the LLM output. It contains sentences nobody heard.
+
+We built it as a mortgage renewal advisor in our playground. Nod along, cough, then cut in, and watch each overlap get scored with the time it took to stop.
+
+Do you log interruptions in production, or tune them by feel?
+
+https://mahimai.ca/blog/voice-agent-backchannel-vs-barge-in
