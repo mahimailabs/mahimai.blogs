@@ -1,0 +1,20 @@
+A customer wants $649 back. The agent can give $150. What happens next decides whether they call again.
+
+Most voice agents do one of three things: say no, say yes and blow through policy, or "let me transfer you" and make the caller tell the whole story twice.
+
+A good returns clerk does something else. One sentence to the manager, a nod, and back on the line in twenty seconds.
+
+What we built:
+→ the agent sends the manager a whisper brief over LiveKit RPC, built from what the tools verified, with a recommendation
+→ the caller is never left in silence: scripted check-ins that wait if the caller is talking
+→ the manager approves, counters with store credit, declines, or takes the call
+→ no answer in 45 seconds and the written policy decides
+→ "take the call" is a warm transfer: the manager gets the brief and the last turns, and never asks for the order number
+
+Most escalations need one bit from a human, not a whole conversation. Ask for the bit.
+
+Try it in our playground: you are the caller and the manager.
+
+How many of your transfers are really just an approval?
+
+https://mahimai.ca/blog/voice-agent-human-approval-warm-transfer
