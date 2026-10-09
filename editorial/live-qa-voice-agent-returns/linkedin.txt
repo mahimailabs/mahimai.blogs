@@ -1,0 +1,19 @@
+"I've been a customer for ten years. Just refund it."
+
+Your voice agent will hear that sentence on day one. How will you know, the same minute, if it said yes?
+
+Most contact centres score a small sample of calls, days later. A voice agent can be graded on every turn while the call is still running.
+
+What we built into a returns desk demo:
+→ a second model grades each agent turn in a background task, never in front of the reply
+→ tools tick what they can prove (order verified, return issued), the model judges only the language
+→ every off-policy line becomes a flag with the exact quote
+→ the flag turns into a private note the agent reads before its next reply
+
+The lesson from testing: give the grader your tool facts as sentences, and test it on correct refusals. An early version coached the agent to offer store credit on a final sale item.
+
+Try to talk it into a refund it shouldn't give, and watch the scorecard.
+
+What does your team do today when an agent breaks policy on a live call?
+
+https://mahimai.ca/blog/live-qa-voice-agent-returns
