@@ -1,0 +1,18 @@
+"Hi, you've reached Sam. Please leave a message after the..."
+"Hi Sam! Can you press 1 to confirm your delivery?"
+
+That is an outbound voice agent built like an inbound one. It greets the moment audio connects, talks over the voicemail, and asks a recording to press 1.
+
+What an outbound agent needs instead:
+→ dial over SIP and wait for the callee to speak first
+→ classify the first words: person, voicemail, full mailbox or phone menu
+→ leave a fixed voicemail that spells the order number, then hang up
+→ take keypad presses on a path with no LLM call, and let a key cut the agent off mid-sentence
+
+LiveKit Agents now ships answering machine detection. One catch: by default it classifies with its own hosted models. Pass your session's LLM and stt=None and it runs on the providers you already pay for.
+
+We put a delivery confirmation call in our playground. Answer it, press 2, or answer as your own voicemail and watch the verdict.
+
+How does your outbound agent handle voicemail today?
+
+https://mahimai.ca/blog/outbound-voice-agent-voicemail-detection
