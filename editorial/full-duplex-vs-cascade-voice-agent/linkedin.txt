@@ -1,0 +1,21 @@
+"Pipeline or speech-to-speech?"
+
+Every voice platform evaluation I sit in starts with that question. Then it turns into a latency argument with three vendors' numbers, measured three ways.
+
+So we built a blind test instead.
+
+A mock interview, two unlabelled interviewers, one LiveKit call:
+→ Interviewer one: Deepgram, gpt-4o-mini, Cartesia, VAD turn detection
+→ Interviewer two: OpenAI GPT-Live, full duplex, listens while it talks
+→ Random order, same instructions, a code-driven handoff mid-call
+→ Every reply timed from the end of your speech to first audio
+
+The panel stays blind until you vote for the one that felt more human. Then it reveals which was which, with a waterfall per reply: turn decided, first token, first audio for the pipeline, one bar for duplex, and a flag when duplex started talking before you finished.
+
+The number to watch is not the stage your vendor quotes. It is e2e_latency in LiveKit's message metrics, the gap the caller actually hears.
+
+Caveats are in the post: the voices differ, and the pipeline is untuned on purpose.
+
+Which one do you think wins the vote?
+
+https://mahimai.ca/blog/full-duplex-vs-cascade-voice-agent
