@@ -1,0 +1,3 @@
+16:9, 1600x900. No text in the image.
+A near-black stage (#0b0b0e). On the left, a glowing purple ring (#b98cf5) around a small line-art delivery truck icon, connected by a dashed line to a phone keypad drawn in thin grey outlines on the right. The "1" key glows the same purple, soft bloom. A faint second path curves away to a small voicemail icon (two circles joined by a line), dimmer.
+Minimal, editorial, Apple-like product illustration. Flat vector shapes, hairline strokes, no gradients except the soft glow, no people, no realistic phone.

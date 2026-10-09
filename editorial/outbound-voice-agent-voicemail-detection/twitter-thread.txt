@@ -1,0 +1,13 @@
+1/ Most outbound voice agents fail on the first second of the call: they greet as soon as audio connects, talk over the voicemail greeting, and ask a recording to press 1. Here is how to build one that waits, listens and decides.
+
+2/ Outbound is a state machine before it is a conversation: dialling, ringing, answered, then who answered. Only after that does the agent speak. Rule: never greet first.
+
+3/ A voicemail answers at the SIP layer with a normal 200 OK. wait_until_answered returns successfully for a machine. No error tells you it was not a person.
+
+4/ LiveKit Agents has AMD: it pauses your agent's speech, classifies the first utterance as human, voicemail, unavailable, IVR or uncertain, then hands control back.
+
+5/ By default it uses its own hosted LLM and STT. Pass llm=self.llm and stt=None and it reuses the call's own model and transcripts. No new line on the bill.
+
+6/ Keypad presses (DTMF) take a fixed path: no LLM call, and session.interrupt() on every press so a key cuts the agent off mid-menu. Speech goes through tools. Both land in the same confirm() and reschedule().
+
+7/ Try it in the browser: answer, press 2, or read a voicemail greeting and watch it leave a message. https://mahimai.ca/blog/outbound-voice-agent-voicemail-detection
