@@ -1,0 +1,19 @@
+Your voice agent passed every test in Chrome. Then a storm hit and the calls came in from dark kitchens on one bar of signal.
+
+The phone network does three things to your audio. It cuts it to 8 kHz. It squeezes every sample into 8 bits. And on a weak cell signal it drops or delays about one packet in six, in bursts.
+
+The third one is the expensive one. A dropped packet looks like a pause, so the endpointer thinks the caller finished in the middle of their account number.
+
+We measured it on a simulated line (Whisper base.en, 40 LibriSpeech utterances):
+→ web audio: 10.0% word error rate
+→ landline, 8 kHz mu-law: 11.8%
+→ bad cell: 15.5%
+→ bad cell with an adaptive jitter buffer, FEC and loss concealment: 11.5%
+
+The codec costs less than people think. The network is what hurts, and most of it is recoverable on the receive side.
+
+We built this into a playground demo: a storm outage line where you move your own call onto a bad cell line, read your account number, and hear how your voice reached the agent.
+
+Have you tested your agent on the line it actually runs on?
+
+https://mahimai.ca/blog/voice-agent-phone-audio

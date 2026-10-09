@@ -1,0 +1,11 @@
+1/ Your voice agent was tested on browser audio. It will be deployed on the phone network. Those are different inputs, and the difference shows up on the worst night of the year.
+
+2/ The phone network: 8 kHz instead of 48, mu-law 8-bit samples, and on a weak cell signal about 17% of 20 ms packets lost or late, in bursts.
+
+3/ The expensive part is the gaps. A dropped packet looks like a pause, so VAD thinks the caller finished mid account number. Put your line simulation in front of VAD, not just STT.
+
+4/ Measured on a simulated line, Whisper base.en, 40 LibriSpeech clips: web 10.0% WER, landline 11.8%, bad cell 15.5%.
+
+5/ Turn on an adaptive jitter buffer, Opus FEC and loss concealment and the bad cell line drops to 11.5%. The codec costs little. The network costs a lot, and most of it is recoverable.
+
+6/ Try it: a storm outage line where you move your own call onto a bad cell line and hear how your voice reached the agent. https://mahimai.ca/blog/voice-agent-phone-audio
