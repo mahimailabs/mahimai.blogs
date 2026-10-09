@@ -1,0 +1,11 @@
+1/ The calls that matter most to a carrier or a bank are the angry ones. They are also the calls most voice agents handle worst. Here is how we built one that reads the room and knows when to hand off.
+
+2/ Don't ask the LLM to notice the caller is losing it. A small meter beside the pipeline scores every turn: anger, threats, asking for a person, repetition, talking over the agent, fast speech. No tokens, no latency.
+
+3/ The score picks one de-escalation move per reply. Repeating themselves? Reflect back, don't re-explain. Asked for a manager? Offer a choice. Threat to leave? Take ownership and do it.
+
+4/ The voice follows. Cartesia sonic-3 takes speed and emotion per request, so the agent slows to 0.88x and softens as frustration climbs. Keep the TTS client per call or one angry caller slows everyone down.
+
+5/ The handoff is code, not a vibe: score 85, three turns above 70, or two asks for a person. The credit limit is enforced in the tool. The human gets a case packet so the caller never repeats themselves.
+
+6/ Play the angry customer on a made-up $215 phone bill and watch your frustration curve: https://mahimai.ca/blog/voice-agent-frustration-deescalation-handoff

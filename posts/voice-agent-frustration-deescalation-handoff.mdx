@@ -1,0 +1,195 @@
+---
+title: 'Voice Agent De-escalation: Score Frustration, Hand Off'
+description: 'An angry caller disputes a phone bill. The agent scores frustration every turn, changes its moves and Cartesia voice, and hands off on a rule.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'de-escalation', 'cartesia', 'human-handoff', 'customer-support']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** Do not ask the LLM to notice that a caller is losing it. Run a small frustration meter beside the pipeline that scores every turn from words and timing, let the score pick one de-escalation move for the next reply, retune the Cartesia sonic-3 voice (slower, softer) per band, and make the handoff to a person a rule in code, not a judgement the model may or may not make. You can play the angry customer on a made-up phone bill below.
+
+"Two hundred and fifteen dollars. My plan is sixty-five. This is ridiculous."
+
+Every support line gets this call. A bot that answers it with "I understand your frustration, per our policy..." turns an annoyed customer into a churned one, and a bot that never hands off turns a churned customer into a complaint to the regulator. The calls that matter most to a carrier, a bank or a utility are the angry ones, and they are exactly the calls most voice agents handle worst.
+
+The usual approach is a line in the system prompt: "if the customer is upset, be empathetic, and transfer them if they ask." That fails in three ways. The model has no memory of how angry the caller was three turns ago. Its empathy is generic and repetitive. And "transfer if needed" is a judgement it makes differently on every run, so you cannot test it, audit it or explain it to an operations team.
+
+This post walks through the [billing de-escalation demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/billing-deescalation) in awesome-voice-apps: a billing agent at Tellwave Mobile, a fictional carrier, that tracks frustration turn by turn, adapts what it says and how it sounds, and hands off on a rule.
+
+## The meter runs beside the LLM, not inside it
+
+The core decision: frustration is measured by plain code that runs on every final user turn, before the LLM is called. It costs no tokens, adds no latency, and every point it adds has a reason you can print.
+
+It reads three kinds of signal:
+
+- **Words**: anger ("ridiculous", "scam"), profanity, threats to leave ("I'm switching", "cancel"), asking for a person ("supervisor", "real person"), and repetition ("I already told you").
+- **Timing**: talking over the agent, speaking faster than 3.3 words a second, and rants of 30 words or more.
+- **Relief**: "thanks", "that helps", and a credit actually landing on the bill.
+
+```python
+CUES = {
+    "anger": (12, ("ridiculous", "unacceptable", "scam", "rip off", "fed up", ...)),
+    "profanity": (15, ("damn", "hell", "crap", ...)),
+    "threat": (18, ("cancel", "switching", "leaving", "lawyer", "complaint", ...)),
+    "human": (10, ("manager", "supervisor", "real person", "transfer me", ...)),
+    "repeat": (10, ("already told you", "third time", "not listening", ...)),
+    "calm": (-12, ("thank you", "that helps", "fair enough", "sounds good", ...)),
+}
+WEIGHTS = {"barge_in": 10, "fast": 8, "rant": 6, "progress": -15}
+DECAY = 5        # a caller who is heard cools a little each turn
+MAX_RISE = 25    # one outburst moves the meter a lot, never straight to a transfer
+```
+
+Two of those numbers matter more than the word lists. `DECAY` encodes something real about angry callers: being listened to, turn after turn, lowers the temperature even before anything is fixed. `MAX_RISE` stops a single shouted sentence from triggering a transfer. Callers vent first. An agent that bails on the first outburst never gets the chance to fix anything.
+
+Timing comes from session events, not the transcript. The agent records when the caller starts and stops speaking, and whether they started while the agent was talking:
+
+```python
+def user_state(event) -> None:
+    if event.new_state == "speaking":
+        if self._started_at is None:
+            self._started_at = event.created_at
+        if self._agent_speaking:
+            self._barged_in = True
+    elif self._started_at is not None:
+        self._spoke_for += max(0.0, event.created_at - self._started_at)
+        self._started_at = None
+```
+
+Why not an LLM classifier for sentiment? You can add one, and for subtle sarcasm it will beat a word list. But it is a second model call on every turn, it is the hardest component in the call to test, and it hides the reason behind a number. Start with signals you can explain to the team that owns escalations. Add a model when your logs show what the rules miss.
+
+## The score picks one move
+
+De-escalation is a set of specific techniques, not a tone. The demo uses seven, and the meter picks exactly one per reply from the strongest signal it heard:
+
+| Signal heard | Move | What the agent does |
+| --- | --- | --- |
+| Repeating themselves | Reflect back | Repeats what they said in their words, re-explains nothing |
+| Asked for a person | Offer a choice | Two options: fix it now, or bring in a specialist |
+| Threat to leave | Take ownership | Says what it will do, the amount, and does it |
+| Anger or profanity | Name the feeling | "That sounds like it blindsided you", then a specific apology |
+| Relief or a credit | Confirm next step | What is done, one next step, short |
+| Nothing, calm | Explain | One charge at a time |
+| Nothing, tense | Acknowledge first | One line of acknowledgement, then the facts |
+
+```python
+def pick_strategy(band: Band, kinds: set[str]) -> Strategy:
+    """One move per reply, most specific signal first."""
+    if band == "handoff":
+        return "handoff"
+    if "repeat" in kinds:
+        return "reflect"
+    if "human" in kinds:
+        return "choice"
+    if "threat" in kinds:
+        return "own"
+    if kinds & {"anger", "profanity"}:
+        return "label"
+    if kinds & {"calm", "progress"}:
+        return "confirm"
+    return "explain" if band == "calm" else "acknowledge"
+```
+
+The order is deliberate. A caller who says "I already told you, this is ridiculous" is angry, but the thing that will make them angrier is hearing the explanation a second time. Reflecting back comes first.
+
+The move reaches the model through `on_user_turn_completed`. In LiveKit Agents 1.8, the `turn_ctx` passed to that hook is a temporary copy of the chat context used for this one reply, so a note added there steers the next response without piling up in the history:
+
+```python
+async def on_user_turn_completed(self, turn_ctx, new_message) -> None:
+    record = self.meter.score_turn(
+        new_message.text_content or "", self._spoke_for, self._barged_in
+    )
+    self._barged_in = False
+    self._spoke_for = 0.0
+    self._voice(record["voice"])
+    publish_ui_event(self.room, "Mood", "update", self.meter.props())
+    if record["strategy"] == "handoff" and not self.handed_off:
+        self.start_handoff(self.meter.handoff_reason)
+    turn_ctx.add_message(role="system", content=strategy_instruction(record))
+```
+
+The note also carries a length budget per band. When the caller is heated, the agent gets two sentences of under fifteen words. Long, careful explanations read as stalling to someone who is angry.
+
+The system prompt bans the phrases that make it worse: "calm down", "per our policy", "unfortunately", "I understand your frustration", "as I said". Every one of them is a reflex in models tuned on support transcripts.
+
+## The voice changes with the room
+
+What the agent says is half of it. Cartesia's sonic-3 takes [`speed` and `emotion` in its generation config](https://docs.cartesia.ai/build-with-cartesia/capability-guides/volume-speed-emotion): speed runs from 0.6 to 1.5, and emotion is a beta control for English, with `neutral`, `calm`, `angry`, `content`, `sad` and `scared` as the best-supported values. Each band in the demo has its own settings:
+
+```python
+VOICE_BY_BAND = {
+    "calm": {"speed": 1.0, "emotion": "content"},
+    "tense": {"speed": 0.95, "emotion": "calm"},
+    "heated": {"speed": 0.88, "emotion": "sympathetic"},
+    "handoff": {"speed": 0.9, "emotion": "calm"},
+}
+
+def _voice(self, settings: dict) -> None:
+    tts = self.tts if utils.is_given(self.tts) and self.tts else self.session.tts
+    if isinstance(tts, cartesia.TTS):
+        tts.update_options(speed=settings["speed"], emotion=settings["emotion"])
+```
+
+The LiveKit Cartesia plugin copies its options when each synthesis stream starts, so calling `update_options` in `on_user_turn_completed`, before the reply is generated, retunes exactly the next utterance.
+
+Two cautions from building this. First, emotion only works when it matches the words. Cartesia's docs say so directly, and you can hear it: a `sympathetic` voice reading a line about late fees sounds odd, reading "that sounds like it caught you off guard" it sounds right. That is another reason the move and the voice are picked together. Second, in a multi-tenant worker the TTS client must be per call. `update_options` mutates the client, so a shared one would slow down every caller on the box because one of them swore. The playground adapter builds a fresh sonic-3 client for each call for exactly this reason.
+
+## The handoff is a rule, not a vibe
+
+The agent hands off when any of three things is true:
+
+1. The score reaches **85**.
+2. The score stays at or above **70 for three turns**. Anger that will not cool is a failed call even if it never spikes.
+3. The caller asks for a person **twice**. The first time, the agent offers a choice. The second time, it stops negotiating.
+
+```python
+if not self.handoff_reason:
+    if band == "handoff":
+        self.handoff_reason = f"Frustration reached {self.score}"
+    elif self.high_streak >= SUSTAINED_TURNS:
+        self.handoff_reason = f"Above {SUSTAINED_AT} for {SUSTAINED_TURNS} turns"
+    elif self.asked_for_human >= 2:
+        self.handoff_reason = "Asked for a person twice"
+```
+
+There is a fourth path the model can take: the `transfer_to_specialist` tool, for when the caller wants more than the agent is allowed to give. That limit is enforced in code too. The agent can credit up to $75 on its own. The three disputed charges add up to $105 ($63 for re-rating the roaming, $17 for device protection added without consent, $25 for a first late fee), so it can never fix all of it alone:
+
+```python
+used = sum(i.credited for i in self.bill.values())
+if used + item.credit_max > AUTHORITY:
+    return (
+        f"Over your limit: ${used:.2f} of ${AUTHORITY:.0f} used, this needs "
+        f"${item.credit_max:.2f}. Offer the billing specialist."
+    )
+```
+
+A prompt that says "never credit more than $75" is a request. A tool that refuses is a control. Your finance team will only accept the second one.
+
+A warm handoff means the caller never repeats themselves, so the agent builds a case packet at the moment of transfer: what was disputed, what was credited, what is still open, the peak frustration, and why it handed off. In production that packet goes to the human agent's screen with the transfer. In the demo it appears on the panel, and the call ends after the handoff line plays.
+
+## Try it
+
+Your Tellwave bill is $215 instead of $65. Play an angry customer: tell the agent it is ridiculous, talk over it, repeat yourself, threaten to switch. Then let it fix something and say thanks. The panel shows your score after every turn against the handoff line, the signals it heard, the move it picked, and the speed and emotion it used to say it. Push past 85 and you are handed to a (simulated) billing specialist with a summary of your case.
+
+<PlaygroundDemo demo="deescalate" />
+
+The bill and the account are made up and nothing is saved. The call runs on Deepgram Nova-3, `gpt-4o-mini` and Cartesia sonic-3.
+
+## What the meter gets wrong
+
+Word lists are blunt. "Great, another charge" is sarcasm the meter scores as relief. Someone who speaks fast by habit reads as agitated. A calm caller who says "I'd like to cancel the device protection" hits the threat list. The demo keeps these errors visible on purpose: every signal is shown with the word that triggered it, so you can see exactly why the score moved.
+
+In production I would add three things before trusting the thresholds. Per-caller baselines for speaking rate, so a fast talker is compared with themselves. A small sentiment model as one more signal, not a replacement, once logs show which turns the rules misread. And calibration against real outcomes: pull the calls that escalated to a complaint and the ones that resolved, and check where the score was on each.
+
+## What this means for you
+
+1. **Measure frustration outside the model.** A meter you can unit test and print is something an operations team can own. A sentence in a prompt is not.
+2. **Pick one move per turn and pair it with the voice.** Generic empathy repeated three times is worse than none. Specific moves, matched to what the caller just did, with a voice that fits the words, are what make the call feel handled.
+3. **Make the handoff and the money rules code.** Thresholds, credit limits and the case packet are where an angry call becomes either a save or a complaint. Neither should depend on how the model feels that run.
+
+The [billing de-escalation source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/billing-deescalation) runs with `uv sync` and `uv run python agent.py console` once you add LiveKit, Deepgram, OpenAI and Cartesia keys, and its tests cover the meter, the moves, the credit limit and the handoff without any keys. LiveKit's [pipeline nodes and hooks](https://docs.livekit.io/agents/logic/nodes/) document `on_user_turn_completed`.
+
+Angry-call handling, escalation rules and the handoff packet are things we test on every support agent in a [production readiness review](/contact), because that is where a polished demo meets the callers who are actually upset.

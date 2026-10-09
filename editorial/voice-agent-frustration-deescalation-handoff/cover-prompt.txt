@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/billing-deescalation.webp in mahimai.ca, which currently holds a flat placeholder in the style of the other new cards.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light, pale light wood desk, a sprig of lavender in a small ceramic pot, muted lavender accents.
+
+Subject: a matte black desk microphone with a thin lavender ring. Above it, a faint dashed jagged speech bubble with sharp sound bars (the angry caller) and below it a smooth solid lavender bubble with a gentle wave (the calm agent). To the right, a printed phone bill with two lines struck through in lavender, and a small card with a line chart that rises to a dashed line and then falls.
+
+Composition: microphone left of centre, bubbles above it, bill and chart right. Calm, editorial, Apple-like restraint. No text, no logos, no people, no real carrier branding.
