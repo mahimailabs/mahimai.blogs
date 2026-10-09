@@ -1,0 +1,20 @@
+"Before you go, I can do seventy percent off for a year."
+
+Nobody approved that offer. The model made it up because a caller pushed and the prompt said retention matters.
+
+Cancel lines are where voice agents meet regulation. California now allows a discount on a phone cancellation only if the caller is told they can say "cancel" at any time. That is a string that must be spoken, not a vibe.
+
+So we built a cancel line where policy is code:
+→ code hears "cancel" on every turn and starts a three-turn clock
+→ one offer, chosen from the caller's reason, never named by the model
+→ the "say cancel any time" disclosure is spoken by code before the offer
+→ every sentence is screened before TTS: pressure lines and unapproved deals are dropped
+→ on a decline, code cancels with no model turn and reads the confirmation number
+
+The one I would copy first: on_user_turn_completed plus StopResponse. Code can take a turn away from the model. It cannot argue with a turn it never gets.
+
+Try to talk your way into a better deal in our playground. Watch the compliance log.
+
+What does your agent decide that a regulator would ask about?
+
+https://mahimai.ca/blog/voice-agent-cancellation-policy-as-code
