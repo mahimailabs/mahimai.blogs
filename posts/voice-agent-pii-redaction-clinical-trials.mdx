@@ -1,0 +1,134 @@
+---
+title: 'Voice Agent PII Redaction: Keep IDs Out of the LLM'
+description: 'A clinical trial voice agent that cuts the participant number out of the transcript before the LLM reads it, and proves it by inspecting every model request.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['voice-agents', 'livekit', 'healthcare', 'clinical-trials', 'privacy', 'pii']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** A cloud voice agent sends the call to three providers, and by default all of them see everything. You can't keep the caller's voice from the speech-to-text provider, but you can decide what the language model and the voice provider get. Redact identifiers inside `stt_node`, before the session, the chat history or the model see the transcript. Keep the real value in your worker. Then route every model request through an `httpx` transport that checks the body for that value. The screen shows a measured zero, not a promise. This post walks through the code, using a clinical trial check-in line.
+
+"Before we go further: which vendors hear the participant, and what exactly does each one receive?"
+
+A research ethics board or a trial sponsor will ask that the first time a voice agent is proposed for participant follow-up. A trial check-in is personal health information tied to an experimental drug. The participant's consent form, the protocol and privacy law all care where it goes. Quebec's Law 25 requires a [privacy impact assessment](https://cloud.google.com/security/compliance/quebeclaw25) before personal information leaves the province. Nova Scotia's [PIIDPA](https://novascotia.ca/just/iap/piidpaquest.asp) limits public bodies to storing and accessing personal information in Canada, with narrow exceptions. Neither is legal advice for your case. Both explain why "we use reputable vendors" doesn't close the conversation.
+
+It's also the call you most want to automate. A study coordinator phoning forty participants a week is the bottleneck, and a missed adverse event matters. Under Canada's [Food and Drug Regulations](https://laws-lois.justice.gc.ca/eng/regulations/C.R.C.,_c._870/section-C.05.014.html), a sponsor has to report serious, unexpected adverse drug reactions to Health Canada on a deadline.
+
+This post walks through the [private health line demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/private-health-line) in awesome-voice-apps. It's a fictional Canadian research hospital's weekly diary call, and the language model never receives the participant number.
+
+## Each provider sees something different
+
+A cascaded voice agent hands the call to three providers. Their jobs differ, so what they need differs:
+
+| Stage | Provider in the demo | Needs | Gets by default | Gets in this demo |
+|---|---|---|---|---|
+| Speech to text | Deepgram Nova-3 | the caller's audio | the caller's audio | the caller's audio |
+| Language model | OpenAI gpt-4o-mini | what was said, to decide what to do next | the full transcript, identifiers included | the transcript with the participant number replaced |
+| Voice | Cartesia Sonic-3 | the sentences to speak | whatever the model writes | whatever the model writes, which can't include a number it never saw |
+
+The speech-to-text row doesn't change: a transcriber has to hear the audio. If your rules forbid any outside processor hearing the call, the answer is speech to text on your own servers, and the rest of this post still applies. For most teams the realistic goal is narrower and very achievable: the model and the voice provider never handle the identifier that links the call to a person.
+
+Trials already work this way on paper. Participants are known in trial records by a subject identification code, not by name ([ICH E6](https://database.ich.org/sites/default/files/E6_R2_Addendum.pdf)), and the key that links code to person stays at the site. The voice agent should keep the same separation. Our worker plays the site: it holds the number, and the model works with a placeholder.
+
+The opinionated take: data minimisation belongs in the worker, not in a vendor contract. A contract tells you what a provider promises to do with data it received. Redaction decides whether it receives it at all.
+
+## Redact before anything reads the transcript
+
+The tempting place to redact is `on_user_turn_completed`, the hook LiveKit Agents runs just before the model is called. It's too late. With preemptive generation on (the default in LiveKit Agents 1.8), the session can send an early model request while you're still speaking, using the transcript as it stands, before that hook runs.
+
+So the demo redacts one layer earlier, in `stt_node`, where speech-to-text events leave the plugin:
+
+```python
+def screen(self, event: stt.SpeechEvent) -> stt.SpeechEvent:
+    """Redact the transcript before the session, the model or the history see it."""
+    final = event.type == stt.SpeechEventType.FINAL_TRANSCRIPT
+    state = self._state
+    hold = state is not None and not state["participant"]
+    carry = self._carry
+    for i, alt in enumerate(event.alternatives):
+        alt.text, found, rest = screen_text(alt.text, carry, hold)
+        if not final or i:
+            continue
+        self._carry = rest
+        if found:
+            self.ledger.redacted += len(found)
+            if hold:
+                state["participant"] = found[0]
+                self.ledger.secret = found[0]
+            self.schedule_publish()
+    return event
+
+async def stt_node(self, audio, model_settings):
+    async def counted():
+        async for frame in audio:
+            self.ledger.audio_ms += int(1000 * frame.samples_per_channel / frame.sample_rate)
+            yield frame
+
+    async for event in Agent.default.stt_node(self, counted(), model_settings):
+        yield self.screen(event) if isinstance(event, stt.SpeechEvent) else event
+```
+
+Every interim, preflight and final transcript passes through `screen`. Preemptive requests, the chat history, the transcript shown in the room, and the turn the model finally answers all see the redacted text. Only the final transcript records the number, so a half-heard interim never becomes the participant ID.
+
+`screen_text` handles how speech to text actually writes a spoken number: "4127", "4 1 2 7" or "four one two seven". It joins runs of digits and digit words. Any run of three to eight digits becomes `[participant number]`. Single numbers like "two doses" are left alone, so the diary answers still reach the model. It over-redacts on purpose: "since 2026" also becomes the placeholder, which costs the model nothing. A caller can also pause mid-number, and speech to text then sends "four one" and "two seven" as two final transcripts. Until the number is recorded, `screen_text` holds back a short run of digits at the end of a transcript (it's redacted too) and joins it to a run at the start of the next one, so no fragment reaches the model.
+
+The model's instructions say what the placeholder means: the number is already recorded, so thank them and move on. The completion tool checks the worker's copy, not the model's word, and asks the model to have them repeat it if nothing was captured.
+
+## Prove it: inspect every model request
+
+"We redact" is a claim. A counter on screen is evidence. The demo builds its own OpenAI client with an `httpx` transport that sees every request body before it leaves the worker:
+
+```python
+class CountingTransport(httpx.AsyncBaseTransport):
+    """Measure and inspect every request the language model client sends."""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        self._ledger.model_request(await request.aread())
+        response = await self._inner.handle_async_request(request)
+        ...
+
+def model_request(self, body: bytes) -> None:
+    self.llm["sent"] += len(body)
+    self.llm["requests"] += 1
+    if self.secret and self.secret.encode() in body:
+        self.leaks += 1
+```
+
+That `leaks` counter is the number at the top of the demo page. It isn't derived from the redaction step. It checks the bytes that were actually about to go to OpenAI, so it would catch a leak from any path: a tool result, a system prompt someone edits later, or a new hook. The transport also keeps the last user message exactly as it was sent, and the panel quotes it with the placeholder highlighted.
+
+The other two providers are measured where their data leaves the worker. That's seconds of audio handed to speech to text, counted in `stt_node`, and characters handed to the voice, counted in `tts_node`. Everything goes to the browser as one `PrivateLine` snapshot on the LiveKit data channel, at most four times a second.
+
+## Try it
+
+Sign in to use the short daily allowance across the playground demos. Use made-up details: it's a simulation, it gives no medical advice, and nothing is saved.
+
+<PlaygroundDemo demo="onprem" />
+
+Things worth trying:
+
+- Say a made-up participant number, digit by digit. Watch it hit the sieve, drop into the worker's vault, and leave a sealed `[participant number]` for the model.
+- Read the "what OpenAI received last" card after each answer. It's the real request content, not a reconstruction.
+- Say you went to the emergency room last week. The tool records it and flags a possible serious adverse event for the study coordinator. The model is told not to reassure you or guess at a cause.
+- Describe a rash as "mild, maybe moderate". The validator records the worse word. Severe is a flag.
+- Ask whether the rash is from the study drug. The agent won't say: that's the coordinator's call, and the instructions forbid it.
+
+## What redaction does not do
+
+**It doesn't anonymise the call.** Symptoms, a voice, and the date of a hospital visit can still identify someone, and the speech-to-text provider hears all of it. Redaction removes the direct identifier from two of the three processors. Treat the rest as personal health information, and check each provider's region, retention and subprocessor terms.
+
+**It only catches what you tell it to.** The demo looks for numbers because the participant number is the identifier the call collects. If a caller volunteers their name, it reaches the model. For a production line, add name detection on the transcript, and design the questions so the agent never asks for direct identifiers it doesn't need.
+
+**The voice provider sees what the model writes.** It can't repeat a number it never saw. But if your agent reads back data from your own systems (an address, a date of birth), the voice provider hears that too. Redact at that boundary as well, or don't read it back.
+
+## What this means for you
+
+- **If you sell voice agents to hospitals, research sites or government**, have a processor table like the one above ready before the first security review. Say what each provider receives, and show the redaction with a counter, not a diagram.
+- **Redact in `stt_node`, not later.** Anything downstream of the transcript, preemptive generation included, will otherwise see the raw text.
+- **Measure at the wire.** A check on the outgoing request body catches leaks your redaction logic didn't anticipate.
+
+If you're working out which processors your voice agent can use, and what each one may receive, that's part of a [production readiness review](/contact).
+
+Sources: [LiveKit Agents nodes and hooks](https://docs.livekit.io/agents/build/nodes/), [ICH E6 Good Clinical Practice](https://database.ich.org/sites/default/files/E6_R2_Addendum.pdf), [Food and Drug Regulations C.05.014](https://laws-lois.justice.gc.ca/eng/regulations/C.R.C.,_c._870/section-C.05.014.html), [Nova Scotia PIIDPA FAQ](https://novascotia.ca/just/iap/piidpaquest.asp), [Quebec Law 25 overview](https://cloud.google.com/security/compliance/quebeclaw25).

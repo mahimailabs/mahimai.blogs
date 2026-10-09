@@ -1,0 +1,21 @@
+"Which vendors hear the participant, and what does each one receive?"
+
+That question stalls voice agent pilots at research hospitals. "We use reputable vendors" doesn't answer it.
+
+A cloud voice agent hands every call to three providers. By default, all three see everything.
+
+So we built a clinical trial check-in line where each one gets only what its job needs:
+→ Deepgram hears the audio (it has to)
+→ our worker cuts the participant number out of the transcript, inside stt_node, before anything else reads it
+→ OpenAI gets the redacted text, with [participant number] in place of the ID
+→ Cartesia only speaks what the model wrote, so it never sees the number either
+
+The part reviewers care about: every model request goes through an httpx transport that checks the outgoing body for the real number. The screen shows how many times it reached the model. Zero, measured at the wire.
+
+Why stt_node and not on_user_turn_completed? Preemptive generation can send the raw transcript to the model before that hook runs.
+
+Call the line, say a made-up participant number, and watch it get caught.
+
+Which identifier in your voice agent reaches the model today without anyone deciding it should?
+
+https://mahimai.ca/blog/voice-agent-pii-redaction-clinical-trials

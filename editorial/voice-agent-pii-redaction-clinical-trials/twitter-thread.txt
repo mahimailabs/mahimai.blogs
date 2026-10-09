@@ -1,0 +1,13 @@
+1/ "Which vendors hear the participant?" stalls voice agent pilots at research hospitals. A cloud voice agent hands every call to three providers, and by default all three see everything. We built a clinical trial check-in line where the LLM never receives the participant number.
+
+2/ The stack is the usual one: Deepgram Nova-3, gpt-4o-mini, Cartesia Sonic-3 on LiveKit Agents. The difference is what each provider gets. Deepgram hears the audio. OpenAI gets the transcript with [participant number] in place of the ID. Cartesia only speaks what the model wrote.
+
+3/ Redact in stt_node, not on_user_turn_completed. Preemptive generation (on by default) can send the raw transcript to the model before that hook runs. In stt_node every interim, preflight and final transcript is redacted before the session sees it.
+
+4/ The worker keeps the real number, like a trial site keeps the key to subject codes. The model works with the placeholder, and the completion tool checks the worker's copy.
+
+5/ The proof: the model client uses an httpx transport that checks every outgoing request body for the real number. The page shows the count. Zero, measured at the wire, so it would also catch a leak from a path you didn't think of.
+
+6/ What it doesn't do: anonymise the call. Symptoms and a voice still identify people, and the transcriber hears everything. It removes the direct identifier from two of three processors.
+
+7/ Say a made-up participant number and watch it hit the sieve: https://mahimai.ca/blog/voice-agent-pii-redaction-clinical-trials

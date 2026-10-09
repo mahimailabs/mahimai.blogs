@@ -1,0 +1,5 @@
+16:9, 1600x900. No text in the image.
+
+A calm editorial illustration on a white, Apple-like product backdrop: a single tall dark panel made of a fine vertical mesh (a sieve) stands in the middle. From the left, a row of small cream word tiles floats toward it and passes through to the right. Three small violet (#6f3fb0) digit tiles have been stopped by the mesh and are dropping into a small violet locked box at its foot. On the right, past the mesh, one tile is an outlined violet placeholder where the digits used to be. A studio microphone sits at the far left; a study diary clipboard with a small red cross leans at the far right.
+
+Style: flat vector with gentle shading, generous negative space, hairline strokes, matching the existing mahimai.ca playground card art (warm off-white wall, light desk line). Lighting soft and even, mood quiet and trustworthy. Palette: white, warm greys, near-black, a single violet accent, one small red cross.
