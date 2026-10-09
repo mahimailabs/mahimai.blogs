@@ -1,0 +1,166 @@
+---
+title: 'Voice Agent Failover: Async Tools and Fallback Providers'
+description: 'A flight rebooking voice agent that keeps talking through an 8 second search and a provider outage: LiveKit async tools, FallbackAdapter and recovery probes.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'reliability', 'function-calling', 'failover']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** A voice agent has two ways to go silent on a bad day: a tool that blocks the turn while it waits on a slow backend, and a provider that fails mid-call with nothing behind it. Make slow tools async (`ctx.update()` releases the turn, the work keeps running), and wrap the LLM and TTS in LiveKit's `FallbackAdapter` with a backup that is already warm. You can rebook a made-up cancelled flight below, take down the agent's voice mid-call, and watch both patterns on a live timeline.
+
+A storm closes the airport at 5pm. Four hundred people with an 18:05 departure open the airline app, see "cancelled", and call. That is the worst afternoon your voice agent will have: every caller needs a search against slow inventory, and every one of those calls lands on your LLM and TTS providers at the same moment as everyone else's.
+
+Two things break first, and neither is the model being wrong. The agent goes quiet for eight seconds while a tool waits on the booking system, and the caller says "hello?" and hangs up. Or a provider starts returning errors under the load, the turn fails, and the call just stops talking.
+
+This post walks through the [flight rebooking demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/flight-rebooking) in awesome-voice-apps, a 370-line LiveKit agent built to survive exactly that afternoon. The airline (Borealis Air) is fictional; the patterns are the ones we put into production agents.
+
+## Dead air is a tool problem
+
+In a normal LiveKit agent, a function tool blocks its turn. The model calls `search_flights`, the framework awaits the function, and nothing is said until it returns. For a database lookup that takes 200 ms, nobody notices. For a fare search against a GDS or an airline's inventory API, which can easily take several seconds under load, the caller hears silence.
+
+The usual fixes are worse than the problem. A spoken "one moment please" before the call still blocks the next question. Splitting the search into "start" and "poll" tools makes the model drive a state machine it will get wrong.
+
+LiveKit Agents (we run 1.8.5) has a better primitive: a tool becomes non-blocking the moment it calls `ctx.update()`. The update goes into the chat context, the model says something natural about it, and the turn is released while the function keeps running. When it finally returns, the result is delivered as a follow-up reply once the agent is idle ([async tools docs](https://docs.livekit.io/agents/logic/tools/async/)).
+
+```python
+@function_tool(on_duplicate="reject")
+async def search_flights(
+    self, ctx: RunContext, preference: Literal["earliest", "nonstop", "any"] = "any"
+) -> str:
+    """Search for replacement flights. Runs in the background for several seconds."""
+    if self.state["rebooked"]:
+        return "The caller is already rebooked."
+    if self.state["options"]:
+        return self._options_text()
+    self.state["search"] = "running"
+    self.log("tool", "search_flights started in the background")
+    await ctx.update(
+        "Searching every flight to Vancouver tonight and tomorrow. Takes a few seconds."
+    )
+    ...
+    async with ctx.with_filler("Still checking seats on the later flights.", delay=4):
+        await asyncio.sleep(SEARCH_SECONDS)  # stands in for the inventory call
+    self.state["options"] = [dict(option) for option in OPTIONS]
+    return self._options_text()
+```
+
+Three details in there do real work:
+
+1. **`ctx.update()` is the release.** Everything before it runs inside the turn; everything after it runs in the background. Put the acknowledgement first, the slow call second.
+2. **`ctx.with_filler(..., delay=4)` only speaks into silence.** If the caller is talking to the agent about their seat, the filler never plays. If the line goes quiet for four seconds, it says one line. It bypasses the LLM entirely, so it costs TTS characters and no tokens.
+3. **`on_duplicate="reject"` stops a second search.** Callers say "so are you looking?" and models helpfully call the tool again. With `reject`, the framework tells the model the call is already running instead of starting a parallel one.
+
+Because the turn is free, the caller can ask the questions people actually ask while they wait. The agent answers them with an instant tool that runs alongside the search:
+
+```python
+@function_tool()
+async def check_policy(
+    self, ctx: RunContext, topic: Literal["seat", "bags", "meal", "hotel", "refund"]
+) -> str:
+    """Answer a question about seats, bags, meals, hotels or refunds. Instant."""
+    running = " while the search keeps running" if self.state["search"] == "running" else ""
+    self.log("tool", f"check_policy({topic}) answered{running}")
+    return POLICY[topic]
+```
+
+"Can I keep my window seat?" gets its answer four seconds into an eight second search. That is the whole user experience difference, and it is a decorator and one `await`.
+
+The agent also runs a `BackgroundAudioPlayer` with a quiet keyboard sound while the LLM is thinking, and a second typing loop for the length of the search. Silence on a phone call reads as a dropped line; a soft room sound reads as someone working.
+
+## Outages are a provider problem
+
+The second failure is less visible in testing, because your test traffic never coincides with your provider's bad hour. In production it does, and storm afternoons are exactly when every airline's agents hit the same APIs.
+
+LiveKit ships a `FallbackAdapter` for LLM, STT and TTS. You give it an ordered list; it sends each request to the first instance marked available, and on an error or timeout it marks that instance unavailable and moves the same request to the next one. In the demo:
+
+```python
+def build_llm(outage: Outage, **kwargs) -> llm.FallbackAdapter:
+    # Not sticky: once the primary passes a recovery probe it serves again.
+    return llm.FallbackAdapter(
+        [
+            FlakyLLM(outage=outage, model=PRIMARY["llm"], **kwargs),
+            openai.LLM(model=BACKUP["llm"], **kwargs),
+        ],
+        attempt_timeout=4.0,
+    )
+
+
+def build_tts(outage: Outage) -> tts.FallbackAdapter:
+    return tts.FallbackAdapter(
+        [FlakyTTS(outage=outage, model="sonic-2"), openai.TTS(model="tts-1", voice="alloy")],
+        max_retry_per_tts=0,
+    )
+```
+
+`FlakyLLM` and `FlakyTTS` are the real OpenAI and Cartesia plugins with one override: while the demo's simulated outage is running, `chat()` or `stream()` raises `APIConnectionError` before any request is sent. Nothing calls a provider to make it fail, so the outage costs nothing. The search tool starts a 15 second LLM outage when it begins ("storm traffic"), and the caller can say "knock out the voice" to fail Cartesia the same way.
+
+The settings that matter, from reading the 1.8.5 adapters:
+
+| Setting | What it does | What we use |
+| --- | --- | --- |
+| `attempt_timeout` (LLM) | Seconds before a hung primary counts as failed. Default 5. | 4. A hung request is the common outage, and the caller is waiting through it. |
+| `max_retry_per_llm` | Retries on the same instance before falling back. Default 0. | 0. Retrying a struggling provider during an incident adds load and latency. |
+| `max_retry_per_tts` | The same for TTS. Default 2. | 0, for the same reason. |
+| `retry_on_chunk_sent` | Whether a request that failed after streaming some output is retried on the backup. Default off. | Off. A reply that already reached the speaker, restarted on another model, repeats itself. |
+| `sticky` (LLM) | Keep using whichever instance last served, even after the primary recovers. Default off. | Off, see below. |
+
+When the primary fails, the adapter starts a **recovery probe**: it replays the failed request against the primary in the background, and when that succeeds it flips the instance back to available and emits `llm_availability_changed` (or `tts_availability_changed`). The demo turns those events into the timeline rows you see on the panel:
+
+```python
+llm_adapter.on(
+    "llm_availability_changed",
+    lambda ev: changed("llm", llm_adapter._llm_instances, ev.llm, ev.available),
+)
+```
+
+In your own agent, that handler is where the page goes to on-call and where the metric that counts failovers per hour gets incremented. A failover you cannot see is a failover you will not fix.
+
+## Sticky or not
+
+`sticky=True` is the option worth thinking about. With it, once the backup has served, the call stays on the backup until the backup itself fails, even after the primary recovers. In the 1.8.5 source the primary is not probed again while the sticky backup keeps succeeding.
+
+That sounds like a detail. It is a product decision:
+
+- **Not sticky** returns to the primary as soon as a probe passes. Cheapest and best quality once the incident is over, but the call can flap between models, and every recovery probe is a real request.
+- **Sticky** keeps one model for the rest of the call. Consistent tone and tool-calling behaviour, no flapping, but a short blip moves the rest of a long call to your backup.
+
+For the LLM, I default to not sticky on short transactional calls (rebooking, intake, scheduling) and sticky on long advisory ones, where a change in model mid-conversation is noticeable. For TTS the question is sharper, because a voice change is audible on the very next sentence. The TTS adapter has no sticky option, so pick a backup voice that sounds close to the primary. In the demo the switch from Cartesia to OpenAI `alloy` is deliberately obvious, so you can hear it happen.
+
+## The backup has to be a different failure domain
+
+Here is the opinion I will defend: **a fallback at the same provider is not a fallback.** If your primary is gpt-4o-mini and your backup is gpt-4.1-nano, an OpenAI incident takes out both. The same goes for two Cartesia voices or two Deepgram models. A real backup sits at a different provider, ideally on a different cloud.
+
+The demo breaks that rule for the LLM, on purpose and for a boring reason: our public playground meters every call per visitor, and its cost sink only prices OpenAI, Deepgram and Cartesia. So the LLM fails over between two OpenAI models, and the TTS fails over across providers (Cartesia to OpenAI). In a client deployment the LLM backup goes to a second vendor, and the backup gets its own prompt tested against it, because tool-calling behaviour differs between model families more than benchmarks suggest.
+
+Two more things that only bite in production:
+
+1. **Warm the backup.** A backup whose first request of the day includes TLS setup and a cold model adds seconds to the exact turn that is already late. Send it real traffic (a small percentage) so connections stay open and you know it still works.
+2. **Fail fast on the primary.** Most outages are slow, not refused. If your attempt timeout is the default 5 seconds plus provider latency, the caller hears six seconds of silence before the backup even starts. Set the timeout to what a caller will tolerate, not to what the provider's SLA says.
+
+## Try it
+
+Sign in to use the short daily allowance across the playground demos. Nothing is booked; the airline and flights are made up.
+
+<PlaygroundDemo demo="rebook" />
+
+Things worth trying, in order:
+
+- Ask to rebook. The search starts, and the panel shows the primary model failing in the same second. Listen for the agent to keep talking on the backup.
+- While it searches, ask "can I keep my window seat?" or "what about my bags?". The answer arrives before the search does, and the timeline marks it.
+- After the options arrive, say "knock out the voice". The next sentence comes from a different provider, and the panel crosses out Cartesia.
+- Pick option C and ask whether a hotel is included.
+
+The panel's bottom rows show the same two moments in a naive agent: a blocking search is eight seconds of dead air, and a provider error with no fallback is a call that stops talking.
+
+## What this means for you
+
+1. **Find your slowest tool and make it async.** Put `ctx.update()` first, add `with_filler` for long waits, and set `on_duplicate` so an impatient caller cannot start it twice.
+2. **Wrap the LLM and TTS in a `FallbackAdapter` with a backup at another provider.** Lower the attempt timeout to what a caller will sit through, and turn retries on the primary off.
+3. **Log every availability change and decide on sticky deliberately.** Flapping and silent failovers are both bugs; you only see them if the events go somewhere.
+
+The [flight rebooking source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/flight-rebooking) runs with `uv sync` and `uv run python agent.py console` once you add Deepgram, OpenAI, Cartesia and LiveKit keys. The LiveKit docs cover [async tools](https://docs.livekit.io/agents/logic/tools/async/) and the [function tool basics](https://docs.livekit.io/agents/logic/tools/definition/).
+
+Slow backends and provider outages are two of the first things we test in a [production readiness review](/contact): we run your agent against the afternoon it will actually have, not the one in the demo.
