@@ -1,0 +1,161 @@
+---
+title: 'Full Duplex vs Cascade Voice Agents: A Blind Test'
+description: 'Two interviewers, one call: a STT, LLM and TTS pipeline against GPT-Live full duplex in LiveKit, with every reply timed and a blind vote.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'gpt-live', 'full-duplex', 'latency']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** "Pipeline or speech-to-speech?" is the first architecture question every voice platform team asks, and spec sheets cannot answer it, because the difference is how the call feels. So we built a blind test: a mock interview with two unlabelled interviewers in one LiveKit call, one a Deepgram, gpt-4o-mini and Cartesia pipeline, the other OpenAI GPT-Live in full duplex. You vote for the one that felt more human, then see every reply timed from the end of your speech. Try it below, and read the 300-line agent that runs it.
+
+Every platform evaluation I sit in starts the same way. Someone has a cascade agent in production, someone else has seen a speech-to-speech demo, and the meeting turns into a latency argument with numbers from three different vendors measured three different ways.
+
+The honest answer is that the two architectures fail differently, and the failure you notice depends on the conversation. A pipeline waits for you to finish, then works in sequence. A full-duplex model listens while it talks, so it can say "mm-hm" while you think and stop the moment you cut in. Whether that matters for your users is an empirical question. So we made it one.
+
+## The test: two interviewers, one call
+
+The [interview coach demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/interview-coach) runs a short practice interview. Interviewer A asks a question and one follow-up. Then Interviewer B does the same with a different question. One of them is a classic pipeline, the other is GPT-Live. Which one goes first is random.
+
+A mock interview is a good stress test for turn-taking. Candidates pause mid-thought ("so the thing was... we had two databases"), restart sentences, and get interrupted. Those are exactly the moments where a pipeline's turn detector and a duplex model's own turn-taking diverge.
+
+Both interviewers get the same instructions, so the only variable is the architecture:
+
+```python
+def instructions(label: str, question: str) -> str:
+    return f"""You are Interviewer {label} in a short practice interview for a software role.
+Nothing is recorded or scored. The candidate is comparing two interviewers blind, so
+never say what technology you run on, and never mention pipelines, models or latency.
+Your question is: "{question}"
+After the candidate's first answer, react in one short sentence that names a detail
+they said, then ask one short follow-up about it. After their second answer, thank
+them in one sentence and stop. Keep every turn under 25 words. Do not grade or coach."""
+```
+
+"Names a detail they said" is deliberate. It forces both interviewers to prove they listened, which is what candidates judge first.
+
+## Two architectures in one AgentSession
+
+The interesting part is that both interviewers live in the same `AgentSession`. In LiveKit Agents, an `Agent` can bring its own models, and a handoff with `session.update_agent()` swaps the active one mid-call. In the 1.8 line (we run 1.8.5), an agent's `llm` can also be a `DuplexModel`, which the framework wraps in a realtime adapter for you.
+
+The pipeline interviewer brings STT, LLM and TTS, and uses VAD to decide when your turn ended:
+
+```python
+class CascadeInterviewer(Agent):
+    """STT, LLM and TTS in sequence: the turn ends before the reply starts."""
+
+    def __init__(self, label: str, question: str, *, stt=None, llm=None, tts=None) -> None:
+        super().__init__(
+            instructions=instructions(label, question),
+            stt=stt or deepgram.STT(model="nova-3"),
+            llm=llm or openai.LLM(model="gpt-4o-mini", max_completion_tokens=120),
+            tts=tts or cartesia.TTS(model="sonic-2"),
+            turn_handling={"turn_detection": "vad"},
+        )
+```
+
+The duplex interviewer brings one model and leaves turn-taking to it:
+
+```python
+class DuplexInterviewer(Agent):
+    """GPT-Live hears the candidate while it speaks and takes turns itself."""
+
+    def __init__(self, label: str, question: str, *, model=None) -> None:
+        super().__init__(
+            instructions=instructions(label, question),
+            llm=model
+            or openai.realtime.GPTLiveModel(
+                voice="marin",
+                responses_options={"max_output_tokens": 200, "reasoning": {"effort": "low"}},
+            ),
+            turn_handling={"turn_detection": "realtime_llm"},
+        )
+```
+
+One gotcha worth knowing if you mix the two: when a realtime model can hand turn-taking to the client, LiveKit turns its server-side turn detection off as soon as the session has a VAD and an explicit client-side mode. Our playground session sets `turn_detection: "vad"` for every cascade demo. Setting `realtime_llm` on the duplex agent keeps the model in charge of its own turns, which is the whole point of the comparison.
+
+## A desk that outlives the handoff
+
+Something has to run the rounds, time the replies and decide when to hand over. That cannot live in either interviewer, because each one is replaced mid-call. It lives in session event handlers, which survive agent handoffs:
+
+```python
+session.on("user_state_changed", self._on_user_state)
+session.on("agent_state_changed", self._on_agent_state)
+session.on("conversation_item_added", self._on_item)
+```
+
+The handoff is driven by code, not by a tool call. A tool call on GPT-Live goes through its backend Responses model, which would add a round trip and a model decision to something we can count. So the desk counts committed candidate turns, and after the reply to the second answer (the "thank you"), it swaps in the next interviewer:
+
+```python
+def advance(self) -> None:
+    if self.round == 0:
+        self.round = 1
+        self.answers = 0
+        self.round_started = time.monotonic()
+        self.session.update_agent(self.build(self.order[1], LABELS[1], QUESTIONS[1]))
+        self.publish_round()
+        return
+    self.done = True
+    self.publish("Reveal", dict(zip(LABELS, self.order)))
+```
+
+A round also moves on after 50 seconds, so a chatty candidate cannot spend the whole call on Interviewer A. In the hosted version, each round gets half of whatever call time the visitor has left.
+
+## Measuring what the candidate hears
+
+Vendor latency numbers usually measure one stage: time to first token, or TTS time to first byte. Candidates do not hear stages. They hear the gap between the end of their sentence and the first sound of the reply.
+
+LiveKit already records that. Every assistant `ChatMessage` carries a `metrics` report with `e2e_latency`, measured from the moment the user stopped speaking to the moment the agent started. For pipeline turns, the same report breaks the gap down: `end_of_turn_delay` (how long the turn detector waited), `transcription_delay` (when the final transcript landed), `llm_node_ttft` and `tts_node_ttfb`.
+
+```python
+total = _ms(metrics.get("e2e_latency"))
+if total is None:
+    total = _ms(self.gap)
+if self.architecture == "cascade":
+    stages = {
+        "endpoint": _ms(user.get("end_of_turn_delay")),
+        "stt": _ms(user.get("transcription_delay")),
+        "llm": _ms(metrics.get("llm_node_ttft")),
+        "tts": _ms(metrics.get("tts_node_ttfb")),
+    }
+```
+
+The fallback (`self.gap`) is our own clock: the time between the session reporting that the user stopped speaking and the agent starting to speak. A duplex model does not always produce the same metrics a pipeline does, so we measure it the same way for both.
+
+One case only a duplex model produces: the agent starts speaking before you stop. A pipeline cannot do that by construction. The desk flags it as an overlap, and the panel shows it as "spoke while you talked" rather than pretending it was a zero-millisecond reply. Whether that overlap felt like attentive listening or like being talked over is what your vote tells us.
+
+## What the panel shows, and when
+
+Turn events go to the browser as LiveKit data packets on the `ui` topic, like every other playground demo. The panel holds them back until you vote. Seeing a stacked bar of "turn decided, first token, first audio" would tell you which interviewer was the pipeline, and the test would stop being blind.
+
+Your vote is stored by the site, not the page. The browser sends "A" or "B", and the server works out which architecture sat in that seat from the call's reservation id, using the same rule the worker used to order the interviewers. The page never gets to claim "I voted for duplex". One vote per call, only from the account that made the call.
+
+## Try it
+
+<PlaygroundDemo demo="interview" />
+
+Two things to try. First, pause halfway through an answer, as if you are thinking. Watch which interviewer jumps in. Second, interrupt each interviewer mid-question. A pipeline stops when VAD hears you; a duplex model decides for itself whether you are taking the turn or just saying "right".
+
+## What the numbers do not show
+
+A few honest caveats about this setup, because I would not want anyone to make a platform decision from one demo.
+
+**The voices differ.** Cartesia's default voice and GPT-Live's `marin` are not the same voice. Some of what you hear as "more human" is the voice, not the architecture. A real evaluation would match voices or rotate them.
+
+**The pipeline is not tuned.** It uses plain VAD turn detection, no turn detector model and no preemptive generation, because that is the baseline most teams ship first. A tuned pipeline with a semantic turn detector and preemptive generation closes a lot of the gap. That is a fair comparison too, and a different one.
+
+**Cost is not symmetric.** GPT-Live bills per minute of session ([$0.05 per minute at OpenAI's published rate](https://developers.openai.com/api/docs/models/gpt-live-1) when we priced it) plus its backend model's tokens. The pipeline bills per audio second and per token. The measurements panel under the call shows the metered cost of each model for your call, from VoiceGateway, so you can see the difference on your own conversation instead of on a pricing page.
+
+**Control is not symmetric either.** With a pipeline, you own every stage: you can swap the STT for one that knows your drug names, put a guardrail between the LLM and TTS, or read codes back character by character. A duplex model gives you instructions, appends and tools, and takes the rest on trust. For a call center agent that has to say a policy number back exactly, that trade matters more than 600 milliseconds.
+
+## What this means for you
+
+1. **Measure the gap the caller hears, not the stage your vendor quotes.** `e2e_latency` in LiveKit's message metrics is the number to put on your dashboard, with the stage breakdown next to it for debugging.
+2. **Test both architectures on your own conversation shape.** An interview, a support call and a booking flow stress turn-taking differently. Mixing agents with different models in one `AgentSession` makes an A/B like this a few hundred lines, not a second stack.
+3. **Decide what you need to control before you decide on latency.** If you need exact read-backs, custom vocabularies or a guardrail in the loop, start from a pipeline and tune it. If natural turn-taking is the product, a duplex model is worth the per-minute bill.
+
+If you are making this call for a production agent, this is the kind of question our [production readiness review](https://mahimai.ca/services) answers with your own calls and your own traffic, not a demo. The [interview coach code](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/interview-coach) is open source if you want to run the blind test on your own stack first.
+
+Sources: [LiveKit GPT-Live plugin guide](https://docs.livekit.io/agents/models/realtime/plugins/gpt-live/), [LiveKit pipeline types](https://docs.livekit.io/agents/models/pipelines/), [LiveKit realtime models overview](https://docs.livekit.io/agents/models/realtime/), [OpenAI GPT-Live model page](https://developers.openai.com/api/docs/models/gpt-live-1).
