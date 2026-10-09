@@ -1,0 +1,19 @@
+"Thanks, that's all." Most support agents send that to their biggest model, with a 4,000-token prompt in front of it.
+
+A voice agent's model bill is calls times turns times prompt size. One model for every turn means frontier rates for "okay" and "can you hear me".
+
+What we built instead, on LiveKit:
+→ every caller turn is embedded once, and that one vector does two jobs
+→ it looks the question up in a semantic answer cache, and a hit is spoken with no model call
+→ otherwise it picks the cheapest model whose example turns it resembles: nano for small talk, mini for account questions, GPT-4.1 for disputes
+→ dispute words always escalate, and only GPT-4.1 can move money
+
+The one I would copy first: tools follow the tier. In our first test run, "take off the duplicate" routed to the tiny model as small talk, and it issued the credit. Now a routing mistake can cost a better answer, never a wrong refund.
+
+One real eight-turn call: $0.0032 in model spend, against $0.0118 on GPT-4.1 for every turn. The dispute still ran on GPT-4.1, because it should.
+
+Call the made-up carrier in our playground and watch each turn pick its model.
+
+Which turns in your agent really need your biggest model?
+
+https://mahimai.ca/blog/voice-agent-llm-cost-routing-semantic-cache

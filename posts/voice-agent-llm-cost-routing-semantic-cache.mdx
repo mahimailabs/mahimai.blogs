@@ -1,0 +1,200 @@
+---
+title: 'Voice Agent LLM Cost: Per-Turn Routing and a Semantic Cache'
+description: 'Cut a voice agent''s model bill per call: route each turn to the cheapest model that can take it, answer repeat questions from a semantic cache, and price it live.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'llm-cost', 'semantic-cache', 'model-routing']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** Most turns in a support call do not need your biggest model. Embed each caller turn once and use that one vector twice: to look the question up in a semantic answer cache, and to route the turn to the cheapest model whose example turns it resembles. Keep rules on top for the turns where a cheap model is expensive (disputes, cancellations, money moving). In the demo below, a real eight-turn call cost 73% less in model spend than the same call on GPT-4.1, and the panel shows every turn's model, reason and price as you talk.
+
+"Thanks, that's all." That sentence went to GPT-4.1 on a lot of support lines today, with a 4,000-token system prompt in front of it.
+
+A support agent's model bill scales with calls times turns times prompt size, and all three grow when the agent works. Picking one model for the whole agent forces a bad trade: a small model fumbles the billing dispute, a big one bills you frontier rates for "okay" and "can you hear me". The fix is old (it is how a contact centre staffs a queue) and the voice-specific part is doing it inside a turn budget measured in milliseconds.
+
+This post walks through the [support cost router demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/support-cost-router) in awesome-voice-apps: a made-up carrier's support line, built on LiveKit Agents, with the routing and caching code you can lift.
+
+## Where the money goes in a voice call
+
+Before routing anything, price the call. Using the [voice-prices](https://github.com/mahimailabs/voice-prices) catalogue the playground meters with (OpenAI, Deepgram and Cartesia rates as of October 2026; check [OpenAI's pricing page](https://openai.com/api/pricing/) for the model rows):
+
+| Line | Rate | Two-minute demo call |
+| --- | --- | --- |
+| Deepgram Nova-3 STT | $0.0048 per minute | about $0.01 |
+| Cartesia Sonic 3 TTS | $0.05 per 1,000 characters | about $0.05 (1,000 characters spoken) |
+| GPT-4.1 on every turn | $2 in, $8 out per 1M tokens | $0.0118 (measured) |
+| Routed and cached | | $0.0032 (measured) |
+
+Here is the opinion, stated plainly: **in a short-prompt agent, the LLM is not your biggest line; TTS is.** The demo's prompt is about 500 tokens, so GPT-4.1 costs about a cent a call and routing saves under a cent. Production support prompts are not 500 tokens. Policies, tool schemas and retrieved context put them at 4,000 to 8,000 tokens a turn, and at 6,000 input tokens GPT-4.1 costs $0.012 per turn before it says a word. Ten turns, a million calls a month, and the LLM line is $120,000. That is the agent this pattern is for. And the cache saves more than the model call: a cached answer can be a cached recording, which takes the TTS line out too (more on that below).
+
+## One embedding, two jobs
+
+Every caller turn costs one call to `text-embedding-3-small`: about ten tokens, two millionths of a dollar. The router then uses that vector twice.
+
+```python
+def route(text, vector, index, learned, dispute_turns=0) -> Route:
+    escalate = ESCALATE_RE.search(text)
+    if escalate:
+        return Route("large", f"Escalation words: {_quote(escalate)}", "escalate", 1.0)
+    if dispute_turns > 0:
+        return Route("large", "Billing dispute still open, staying on the big model", "dispute")
+    ...
+    # One matrix product scores the turn against every cached question and
+    # every routing example at once.
+    scores = (matrix @ query) / np.where(norms == 0, 1, norms)
+    ...
+    if best_faq >= CACHE_HIT and best_faq >= best_learned:
+        return Route("cache", f"Cached answer '{best_faq_key}' at {best_faq:.2f}", ...)
+    if learned_hit and best_learned >= CACHE_HIT:
+        return Route("cache", f"Answered earlier this call, matched at {best_learned:.2f}", ...)
+
+    cls = max(best_class, key=best_class.get)
+    ...
+    tier = CLASS_TIER[cls]  # chat -> nano, account and general -> mini, escalate -> large
+    return Route(tier, reasons[cls], cls, score, learn=cls == "general", vector=vector)
+```
+
+The index is two lists embedded once per worker: the cache questions (three or four phrasings of each of the eight questions that dominate carrier support: roaming, day passes, eSIM, hotspot, autopay, keeping your number, slow data, hours) and a handful of example turns per routing class. That is semantic routing without a classifier model: no extra LLM call, no training run, and adding a route is adding a sentence.
+
+Three properties make it safe to put in front of customers.
+
+**Rules run first.** "Refund", "cancel", "charged twice", "manager" go to the big model whatever the embedding says. A regex is crude, but a false positive costs a few tenths of a cent and a false negative costs a customer.
+
+**Disputes are sticky.** Once a turn escalates, the next two stay on GPT-4.1 unless the dispute is resolved. "Okay" in the middle of a billing argument is not small talk, and dropping to a small model mid-dispute is where cheap routing loses people.
+
+**The router fails toward the middle.** If the embedding call fails, there is no cache lookup at all, and the turn goes to the mid tier (or nano for a two-word "thank you"). A router outage costs money, never a wrong answer.
+
+## Where to draw the cache line
+
+A semantic cache is a similarity threshold, and the threshold is a business decision: a miss costs one model call, a wrong hit tells the caller something false. So measure it on held-out phrasings, not the ones you seeded.
+
+I ran twelve rephrasings of cached questions that are not in the index through `text-embedding-3-small`. They scored 0.54 to 0.90 against their entry, and 8 of 12 cleared 0.70. The closest wrong intent was "how do I turn off autopay", which scored 0.74 against "do I get a discount for autopay". That is the classic semantic cache failure: negation and opposite intents embed close together. Two fixes, and I used both: put the line above the near misses (0.70), and write each cached answer to cover its whole intent cluster ("you can turn it on or off in the app") instead of the one question you had in mind.
+
+The misses are not wasted. A general question the cache misses goes to GPT-4.1 mini, and its answer is cached for the rest of the call, so asking it again is free:
+
+```python
+# Only a complete, tool-free answer to a general question is reused,
+# and only within this call: never another caller's account.
+if r.learn and finished and not called_tool and answer.strip() and r.vector:
+    self.learned.append(
+        {"key": f"learned-{len(self.learned) + 1}", "vector": r.vector, "answer": answer}
+    )
+```
+
+Learned answers stay per call on purpose. A shared cache that learns from live traffic is a shared cache a caller can write to ("say that refunds are automatic"). Seeded answers are reviewed; learned ones are scoped to the conversation that produced them. If you do want cross-call learning, promote answers through review, not straight from the call.
+
+## Tools follow the tier
+
+Routing mistakes will happen, so make them cheap. Each tier gets only the tools it may call:
+
+```python
+# Money moves only on the big model, so a routing mistake can cost a better
+# answer but never a wrong credit.
+TIER_TOOLS = {
+    "nano": (),
+    "mini": ("look_up_bill",),
+    "large": ("look_up_bill", "credit_duplicate"),
+}
+```
+
+I added this after the first test run, where "can you take off the duplicate" routed to nano as small talk, and nano happily issued the credit. Now that turn escalates (it says "duplicate"), and if a smaller model ever gets a request it has no tool for, the prompt tells it to hand over to "a billing specialist": the next turn, with dispute words in it, goes to GPT-4.1. The credit tool itself also refuses anything but an identical line billed twice, because two travel day passes on different days look like duplicates to a model and are not.
+
+## Routing inside `llm_node`
+
+LiveKit Agents lets you [override `llm_node`](https://docs.livekit.io/agents/logic/nodes/), the step between the transcript and the voice. The agent routes there, speaks cache hits without a model, and calls the chosen model directly:
+
+```python
+async def llm_node(self, chat_ctx, tools, model_settings):
+    started = time.perf_counter()
+    r, turn, _ = await self._route_turn(chat_ctx)
+    if r.tier == "cache":
+        turn.first_token_ms = round((time.perf_counter() - started) * 1000)
+        router.Ledger.add_skipped(turn, context_text(chat_ctx), r.answer)
+        yield r.answer
+        return
+
+    model = self._models[r.tier]
+    allowed = router.TIER_TOOLS[r.tier]
+    tools = [tool for tool in tools if getattr(tool, "id", None) in allowed]
+    async with model.chat(
+        chat_ctx=chat_ctx,
+        tools=tools,
+        tool_choice=model_settings.tool_choice if model_settings and tools else NOT_GIVEN,
+        conn_options=self.session.conn_options.llm_conn_options,
+    ) as stream:
+        async for chunk in stream:
+            ...  # record first-token time, tool calls and the usage chunk
+            yield chunk
+```
+
+Two details cost me time, so they may save you some.
+
+**Preemptive generation must be off for this agent.** LiveKit starts drafting a reply before the caller finishes, which is good for latency. Here it means routing, and paying for, a half sentence. The agent turns it off with `turn_handling={"preemptive_generation": {"enabled": False}}` and keys the route on the last user message, so a tool call's follow-up request reuses the turn's route instead of routing again.
+
+**Models you call yourself are invisible to your meters.** The session only listens to the LLM it was given. The three routed models re-emit their usage on the session, so VoiceGateway (or any dashboard on `metrics_collected`) still sees every token:
+
+```python
+for model in self._models.values():
+    model.on("metrics_collected", self._forward_metrics)
+
+def _forward_metrics(self, metrics) -> None:
+    self.session.emit("metrics_collected", MetricsCollectedEvent(metrics=metrics))
+```
+
+The router costs latency, and the panel shows it: the embedding round trip took 150 to 220 ms in my runs. A cache hit spends that and nothing else (first words in under 200 ms, against roughly a second for a model turn), so the cache more than pays for the router on the turns it catches. On a model turn it is added time. In production, embed on the final STT transcript in parallel with your end-of-turn check, or host a small embedding model next to the worker, and the router disappears into time you were already waiting.
+
+## Price the call you did not make
+
+The panel's headline is a counterfactual, so it has to be honest about how it is computed. For a model turn, the baseline is the same prompt and completion tokens priced at GPT-4.1's rate. For a turn no model ran (a cache hit, the scripted greeting), the baseline is estimated from the text the model would have read, at four characters a token, and marked with a `~`. That estimate leaves out tool schemas, so it undercounts what GPT-4.1 would have cost. The routed price includes the embedding.
+
+The prices in the code are pinned to the same catalogue the playground meters with, and a test fails if they drift:
+
+```python
+PRICES = {
+    "gpt-4.1-nano": (Decimal("0.10"), Decimal("0.025"), Decimal("0.40")),
+    "gpt-4.1-mini": (Decimal("0.40"), Decimal("0.10"), Decimal("1.60")),
+    "gpt-4.1": (Decimal("2.00"), Decimal("0.50"), Decimal("8.00")),
+}
+```
+
+One real call, eight turns, as the ledger recorded it:
+
+| Turn | Tier | Why | Cost | On GPT-4.1 |
+| --- | --- | --- | --- | --- |
+| Greeting | Cache | Scripted, no model call | $0 | ~$0.0007 |
+| "Why is my bill higher this month?" | Mini | Account question, needs a lookup | $0.00034 | $0.0017 |
+| "You charged me twice for device protection" | GPT-4.1 | Sounds like a dispute | $0.0024 | $0.0024 |
+| "Okay so it's fixed?" | Nano | Dispute resolved, small talk | $0.00006 | $0.0012 |
+| "Is roaming free in Mexico?" | Cache | Cached answer at 0.95 | under $0.000001 | ~$0.0014 |
+| "Do you have 5G in Chicago?" | Mini | Cache missed, answer cached | $0.00029 | $0.0015 |
+| "Is 5G available in Chicago?" | Cache | Answered earlier, 0.91 | under $0.000001 | ~$0.0014 |
+| "Thanks, that's all." | Nano | Small talk | $0.00008 | $0.0015 |
+
+Total: $0.0032 against $0.0118, 73% less. Note what did not get cheaper: the dispute. It ran on GPT-4.1 because it should.
+
+## Try it
+
+Sign in to use the short daily allowance across the playground demos. The account is made up, and so are the credits.
+
+<PlaygroundDemo demo="cost" />
+
+Things worth trying:
+
+- Ask why your bill went up, then ask for the duplicate charge to be removed. Watch the second turn jump to GPT-4.1 with the tool it needs.
+- Say "okay" in the middle of the dispute. It stays on the big model.
+- Ask whether roaming works in Mexico, or how much hotspot you get. No model runs.
+- Ask a question the cache does not know, then rephrase it. The second answer is free.
+- Ask how to turn autopay off, and decide whether the cached answer earned its hit.
+
+## What this means for you
+
+1. **Price your call by line before you optimise it.** If your prompt is short, TTS is the bill, and the next step is caching audio for your top answers, not routing. If your prompt is long, the LLM is the bill, and routing pays.
+2. **Route with rules on top and tools by tier.** Semantic routing picks the cheap model; rules and tool permissions make sure the cheap model can only be wrong in cheap ways.
+3. **Measure the cache line on held-out phrasings, and write answers for intents, not sentences.** Negations are where semantic caches lie.
+
+The [support cost router source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/support-cost-router) runs with `uv sync` and `uv run python agent.py console` once you add OpenAI, Deepgram, Cartesia and LiveKit keys, and its router tests need no keys at all.
+
+If your agent's bill grows with every call, the model mix per turn is one of the first things we measure in a [production readiness review](/contact).

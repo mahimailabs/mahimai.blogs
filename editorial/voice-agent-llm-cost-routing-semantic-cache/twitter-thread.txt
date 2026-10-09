@@ -1,0 +1,13 @@
+1/ "Thanks, that's all." Most support voice agents send that to their biggest model with a 4,000-token prompt in front of it. We built a line that routes every turn to the cheapest model that can take it, and prices the gap live.
+
+2/ One embedding per turn, two jobs. Look the question up in a semantic answer cache (a hit is spoken with no model call), and route by example: nano for small talk, mini for account questions, GPT-4.1 for disputes.
+
+3/ Rules run first. "Refund", "cancel", "charged twice" go to the big model whatever the embedding says. Disputes are sticky: "okay" mid-argument stays on GPT-4.1.
+
+4/ Tools follow the tier. Our first run sent "take off the duplicate" to the tiny model, and it issued the credit. Now only GPT-4.1 can move money.
+
+5/ Measure the cache line on held-out phrasings. "How do I turn off autopay" scored 0.74 against "autopay discount". Negations are where semantic caches lie.
+
+6/ One real call: $0.0032 vs $0.0118 on GPT-4.1, 73% less. Short prompt, so TTS was still the bigger line. Price your call by line first.
+
+7/ Try it, with the code: https://mahimai.ca/blog/voice-agent-llm-cost-routing-semantic-cache
