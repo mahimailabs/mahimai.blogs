@@ -1,0 +1,17 @@
+"To be upfront, we're already talking to your competitor."
+
+The battle card for that line exists. It is three clicks away in a Notion page. The buyer is waiting.
+
+We built a sales call you can take yourself to show the fix. You play the rep, an AI buyer pushes back, and a second agent on the call never says a word:
+→ it hears both sides of the conversation
+→ embeds what the buyer just said and matches it against a 12-card playbook
+→ puts the card on your screen in about 200 ms
+→ then writes one sentence you can say, about a second later
+
+The takeaway: never make the card wait for the model. Retrieval goes on screen the moment it returns. Generation fills in after. Both are timed from when the buyer stopped talking.
+
+The floor matters more than the model. On-topic buyer lines scored 0.48 to 0.85 against their card. Small talk stayed under 0.33. A copilot that fires on "sure, go ahead" gets ignored by week two.
+
+How long does your team take to find the right answer after an objection?
+
+https://mahimai.ca/blog/ai-sales-copilot-livekit
