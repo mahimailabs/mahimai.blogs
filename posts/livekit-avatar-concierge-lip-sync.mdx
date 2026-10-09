@@ -1,32 +1,34 @@
 ---
 title: 'LiveKit Avatar Agents: Keep the Face in Sync'
-description: 'Put a lip-synced video avatar on a LiveKit voice agent: the avatar as its own participant, interruptions that stop the face, and how to measure sync.'
+description: 'Put a lip-synced avatar on a LiveKit voice agent: the avatar as its own participant, a face drawn in the browser, interruptions that stop it, and how to measure sync.'
 pubDate: 2026-10-09
 author: 'Mahimai Raja J'
-tags: ['livekit', 'voice-agents', 'avatars', 'anam', 'interruptions']
+tags: ['livekit', 'voice-agents', 'avatars', 'spatius', 'interruptions']
 draft: false
 ---
 
 import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
 
-> **TL;DR:** A video avatar on a LiveKit agent is not a skin on the voice. It is a second participant in the room that receives your agent's audio and publishes its own audio and video. That moves three things you used to get for free: interruptions now have to stop someone else's face, the transcript has to be cut where that face stopped, and latency gains a stage you have to measure. You can talk to a concierge built this way below, cut it off mid-sentence, and watch the numbers.
+> **TL;DR:** An avatar on a LiveKit agent is not a skin on the voice. It is a second participant in the room that receives your agent's audio and publishes its own audio, plus the motion the browser needs to draw a face. That moves three things you used to get for free: interruptions now have to stop someone else's face, the transcript has to be cut where that face stopped, and latency gains a stage you have to measure. You can talk to a concierge built this way below, cut it off mid-sentence, and watch the numbers.
 
 A hotel lobby at 1 a.m. has a bell, an empty desk and a guest who wants dinner. "The concierge never sleeps" is the pitch for putting a talking face on a screen there, and in a bank branch, a clinic waiting room or a car dealership showroom.
 
-The pitch sells itself. The engineering is where most avatar demos fall apart: the face keeps talking for half a second after you interrupt it, the lips lag the voice on a slow network, or the agent "remembers" saying a sentence the guest never heard. This post walks through the [hotel concierge demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/hotel-concierge) in awesome-voice-apps, built on LiveKit Agents 1.8.5 and an [Anam](https://anam.ai) avatar, and the patterns that keep the face honest.
+The pitch sells itself. The engineering is where most avatar demos fall apart: the face keeps talking for half a second after you interrupt it, the lips lag the voice on a slow network, or the agent "remembers" saying a sentence the guest never heard. This post walks through the [hotel concierge demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/hotel-concierge) in awesome-voice-apps, built on LiveKit Agents 1.8.5 and a [Spatius](https://spatius.ai) avatar, and the patterns that keep the face honest.
 
 ## The avatar is a participant, not a renderer
 
-The intuitive picture is a pipeline: STT, LLM, TTS, then a box that turns audio into a face. LiveKit's [avatar integration](https://docs.livekit.io/agents/models/avatar/) does something different. The avatar provider runs its own worker that **joins the room as a separate participant**. Your agent streams its TTS audio to that participant, and the avatar publishes synchronized audio and video to the caller.
+The intuitive picture is a pipeline: STT, LLM, TTS, then a box that turns audio into a face. LiveKit's [avatar integration](https://docs.livekit.io/agents/models/avatar/) does something different. The avatar provider runs its own worker that **joins the room as a separate participant**. Your agent streams its TTS audio to that participant, and the avatar publishes synchronized audio and face to the caller.
+
+Spatius takes that one step further. It does not render video on a server at all. Its participant publishes the audio and a track of **motion data** (packed into otherwise black video frames), and the browser draws the face with 3D Gaussian splatting. The caller's GPU does the rendering, so the provider streams kilobytes of motion instead of megabits of video.
 
 So a call now has three participants: the caller, your agent and the avatar. Your agent publishes no audio of its own. The avatar's token carries an `lk.publish_on_behalf` attribute naming your agent, which is how a frontend knows that face belongs to that agent.
 
-Why route it this way instead of rendering frames inside your worker? Because lip sync is decided where audio and video are muxed. If the avatar publishes both tracks, they leave the same process with the same clock, and WebRTC keeps them aligned at the caller. If your worker published the audio and the avatar published the video, every jitter difference between two paths would show up on the lips.
+Why route it this way instead of rendering frames inside your worker? Because lip sync is decided where audio and motion are paired. If the avatar publishes both tracks, they leave the same process with the same clock, and WebRTC keeps them aligned at the caller. If your worker published the audio and the avatar published the face, every jitter difference between two paths would show up on the lips.
 
 Wiring it up is short. The avatar starts before the session, so the session's audio output is already pointed at it:
 
 ```python
-from livekit.plugins import anam
+from livekit.plugins import spatius
 
 session = AgentSession(
     userdata=initial_state(),
@@ -37,11 +39,9 @@ session = AgentSession(
 )
 await ctx.connect()
 
-avatar = anam.AvatarSession(
-    persona_config=anam.PersonaConfig(name="Mira", avatarId=os.environ["ANAM_AVATAR_ID"]),
-    avatar_participant_name="Mira",
-)
-# Replaces the session's audio output with a byte stream to the avatar.
+# Reads SPATIUS_API_KEY, SPATIUS_APP_ID and SPATIUS_AVATAR_ID from the environment.
+avatar = spatius.AvatarSession(avatar_participant_name="Mira")
+# Replaces the session's audio output with a stream to the avatar.
 await avatar.start(session, room=ctx.room)
 # Without this, the greeting plays as audio before there is a face.
 await avatar.wait_for_join()
@@ -49,21 +49,40 @@ await avatar.wait_for_join()
 await session.start(agent=HotelConcierge(ctx.room), room=ctx.room)
 ```
 
-`avatar.start()` asks Anam to start a session with a LiveKit token it mints for the avatar, then swaps the agent's audio output for a `DataStreamAudioOutput` that sends audio frames to the avatar's identity over a LiveKit byte stream. `wait_for_join()` blocks until the avatar has joined and published video, with a 30 second default timeout.
+`avatar.start()` mints a LiveKit token for the avatar (publish only, no subscribe), opens a Spatius session that will join the room with it, and swaps the agent's audio output for a queue that streams TTS audio to Spatius as Ogg Opus. `wait_for_join()` blocks until the avatar has joined and published its motion track, with a 30 second default timeout.
+
+One detail bites here: Ogg Opus only encodes at 8, 12, 16, 24 or 48 kHz. OpenAI and Cartesia voices run at 24 kHz, so this demo is fine. A TTS at 22,050 Hz fails at `start()` until you pin a supported `sample_rate` or send raw PCM.
 
 Our playground runs every demo in one shared worker, and we put a 15 second timeout on that wait. If the avatar does not arrive, the call ends before any model or voice is billed. A voice that talks to a blank tile is worse than no call.
+
+## The face is drawn in the browser
+
+Because the face arrives as motion, not video, a plain `<video>` element shows a black frame. The Agent Console and the LiveKit Playground do too. The page has to run the Spatius web SDK, and that SDK has to see the motion track before the room connects:
+
+```ts
+const room = new Room({ singlePeerConnection: false });
+const avatar = await AvatarManager.shared.load(avatarId);
+const view = new AvatarView(avatar, container);
+const player = new AvatarPlayer(new LiveKitProvider(), view);
+await player.attach(room); // before connect, so it can read the motion track
+await room.connect(url, token);
+```
+
+Three things follow from that order. The browser needs the app ID and avatar ID before it joins, so our session endpoint returns them alongside the LiveKit token, and the Spatius API key never leaves the worker. The room needs one peer connection per direction (`singlePeerConnection: false`) so the SDK can install its frame transform on a fresh receiver. And the browser needs insertable streams (`RTCRtpScriptTransform`) plus WebGL2 or WebGPU. Where those are missing, our page skips the face and keeps the call: the voice and the booking still work.
 
 ## Interruptions now stop someone else's face
 
 In a voice-only agent, an interruption is local. VAD hears the caller, the session stops TTS, and the audio track goes quiet. With an avatar, the audio you need to stop is already in another process's buffer, being turned into mouth shapes.
 
-LiveKit handles this with RPCs between the agent and the avatar worker:
+The agent and the avatar worker handle this between them:
 
-| RPC | Direction | What it does |
+| Signal | Direction | What it does |
 | --- | --- | --- |
-| `lk.clear_buffer` | agent to avatar | Drop queued audio and stop the face now |
-| `lk.playback_started` | avatar to agent | The first frame actually played |
-| `lk.playback_finished` | avatar to agent | Playback ended, with the position reached and whether it was interrupted |
+| interrupt | agent to Spatius session | Drop queued audio and stop the face now |
+| `lk.playback_started` (RPC) | avatar to agent | The first frame actually played |
+| `lk.playback_finished` (RPC) | avatar to agent | Playback ended, with the position reached and whether it was interrupted |
+
+If the avatar never confirms an interrupt, the plugin marks playback finished itself after two seconds, so the session can't hang waiting for a face that went away.
 
 The second half matters more than it looks. When the caller cuts in, the agent does not know how much of its sentence was heard. It only knows how much it sent. `lk.playback_finished` carries the **playback position**, so the session truncates the assistant's message in the chat history at the point the face stopped. Without it, the model believes it said "and they have a table at nine, but the kitchen closes at" when the guest heard "and they have a table at nine". The next turn then builds on words that never reached anyone.
 
@@ -99,7 +118,7 @@ One avatar-specific note in the prompt: the concierge reads the confirmation cod
 
 Voice agents are usually measured as STT, then LLM time to first token, then TTS time to first byte. An avatar adds a stage after TTS, and it is invisible in those numbers. LiveKit emits `AvatarMetrics` on the session's `metrics_collected` event with two timings:
 
-- **Join latency:** avatar session start to the avatar's video track arriving in the room.
+- **Join latency:** avatar session start to the avatar's motion track arriving in the room.
 - **Playback latency:** first audio frame sent to the avatar until its playback starts.
 
 Interruption timing is not in those metrics, so the demo measures it from session state: the moment the caller starts speaking while the agent is speaking, to the moment the agent leaves the speaking state.
@@ -142,11 +161,11 @@ Everything is simulated: the hotel, the restaurants and the booking are made up,
 
 ## What it costs to run
 
-An avatar changes the cost shape of a call. Speech, model and voice are billed by usage. Anam bills avatar session time, and the meter runs from the moment you request the avatar, including the seconds it takes to join and any silence while the guest thinks. ⚠ VERIFY: check the per-minute rate on your Anam plan before quoting it; we bill it to the call at a configurable rate.
+An avatar changes the cost shape of a call. Speech, model and voice are billed by usage. Spatius bills avatar session time in credits, and the meter runs from the moment you request the avatar, including the seconds it takes to join and any silence while the guest thinks. ⚠ VERIFY: third-party listings put the paid plans near $0.01 a minute; check your plan before quoting it. We bill it to the call at a configurable rate.
 
 Our playground meters every provider per call against a budget. For this demo that meant two changes: the worker reports avatar seconds as their own cost line, billed by the started second, and the reservation floor for an avatar call is higher than for a voice-only one. The room also needs room for three participants instead of two, and we size that per demo rather than raising it for every call.
 
-On the LiveKit side, a 2-minute call now carries a video track as well as audio, so bandwidth goes up. If you are running avatars at volume, this is the line that grows fastest after the avatar itself.
+On the LiveKit side, the motion track is mostly black frames, so it costs far less bandwidth than server-rendered video. The cost moves to the caller's device instead: an old phone draws the face more slowly than a laptop, so test on the hardware your users actually carry.
 
 ## What this means for you
 
@@ -154,6 +173,6 @@ On the LiveKit side, a 2-minute call now carries a video track as well as audio,
 2. **Test interruptions against the transcript, not the audio.** Interrupt mid-sentence, then ask the agent what it just said. If it repeats words the face never spoke, playback position is not reaching your chat history.
 3. **Add join and playback latency to your dashboards.** They sit after TTS and do not show up in the STT, LLM and TTS numbers you already track. A slow avatar region looks exactly like a slow model to your users.
 
-The [hotel concierge source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/hotel-concierge) runs with `uv sync` and `uv run python agent.py dev` once you add LiveKit, OpenAI and Anam keys. The [LiveKit avatar docs](https://docs.livekit.io/agents/models/avatar/) list every supported provider, and the [Anam plugin guide](https://docs.livekit.io/agents/models/avatar/plugins/anam/) covers avatar setup and director notes.
+The [hotel concierge source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/hotel-concierge) runs with `uv sync` and `uv run python agent.py dev` once you add LiveKit, OpenAI and Spatius keys. The [LiveKit avatar docs](https://docs.livekit.io/agents/models/avatar/) list every supported provider, the [Spatius plugin guide](https://docs.livekit.io/agents/models/avatar/plugins/spatius/) covers avatar setup and audio formats, and the [Spatius client guide](https://docs.spatius.ai/livekit-agents/client) covers the browser side.
 
 If you are putting a face on an agent that customers will talk to in a lobby, a branch or an app, interruption handling and the transcript it leaves behind are among the first things we check in a [production readiness review](/contact).
