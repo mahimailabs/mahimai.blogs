@@ -1,0 +1,17 @@
+1/ "We're already talking to your competitor."
+
+The battle card exists. It's three clicks away. The buyer is waiting.
+
+We built a sales call you can take yourself, with a silent second agent that puts the card on screen ~200 ms after the buyer stops talking.
+
+2/ Two agents, one call. The prospect speaks through STT, LLM and TTS. The copilot never speaks. It hears both sides and only writes to the rep's screen. If it fails, the rep is on their own. The call goes on.
+
+3/ Split the copilot in two. Retrieval: embed the buyer's line, match a 12-card playbook, publish the card. Generation: a small model turns the card into one sentence. The card never waits for the sentence.
+
+4/ Pick the retrieval floor from data. Our on-topic buyer lines scored 0.48 to 0.85 against their card. "Sure, go ahead" scored under 0.33. Floor at 0.42, in the gap.
+
+5/ You often don't need a second STT. LiveKit Agents already publishes both sides of the call as text streams on lk.transcription. A copilot participant can just read them.
+
+6/ Try it: sell AP software you've never heard of to a skeptical VP Finance, with the copilot in your ear.
+
+https://mahimai.ca/blog/ai-sales-copilot-livekit
