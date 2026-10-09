@@ -1,0 +1,169 @@
+---
+title: 'Voice Agent Turn Detection: Stop Cutting Callers Off'
+description: 'A silence timer ends a caller turn at every pause. Run LiveKit turn detection beside it on the same audio and watch every cut it would have made.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'turn-detection', 'endpointing', 'vad']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** A voice agent that ends the caller's turn after a fixed stretch of silence will cut them off every time they pause to think, and callers pause most while reading out the details you need: addresses, phone numbers, account numbers. An end-of-turn model decides from the audio whether they are done, and waits when they are not. Do not take that on faith: run a plain silence timer in shadow on the same audio, log where it would have cut, and you get the number that justifies the change. You can try both on one call below.
+
+"Yeah, it's 42... uh... Maple. Maple Street."
+
+That is how people give an address on the phone. Two pauses, each longer than half a second, in the middle of the one answer the agent cannot get wrong. A voice agent with a silence timer hears "Yeah, it's 42", decides the caller is done, and starts answering. The caller talks over it, the agent stops, and now the conversation is about the interruption instead of the furnace.
+
+The demo in this post is an after-hours emergency line for a made-up heating company. It is minus 20 outside and the furnace is dead. The agent takes the problem, the address, a callback number and two safety answers, then books a technician. Underneath, it runs two endpointers on the same audio: LiveKit's turn detector, which actually decides when the turn ends, and a silence timer that only watches. The panel draws both.
+
+## Why a silence timer cuts people off
+
+Most voice pipelines decide "the user is done" with voice activity detection (VAD) plus a timeout. VAD says whether there is speech in the last few milliseconds of audio. When it has seen enough silence, the turn ends and the transcript goes to the LLM.
+
+In LiveKit Agents with `turn_detection="vad"`, that is the whole decision. Silero VAD's default `min_silence_duration` is 0.55 seconds, and the session's default minimum endpointing delay is 0.5 seconds, so any pause longer than about half a second ends the turn.
+
+Half a second is short. People pause that long while they:
+
+- recall a house number or read a phone number off a fridge magnet,
+- say "uh" before the street name,
+- switch from the problem ("it just stopped") to the detail ("and it's making a clicking sound"),
+- check with someone else in the room.
+
+Raising the timeout to two seconds fixes the cut-offs and makes every normal answer feel slow, because now the agent waits two seconds after "yes" too. A fixed timer cannot tell "42... uh..." from "yes." Both are just silence.
+
+## What the turn detector adds
+
+An end-of-turn model looks at what was said and how, and predicts the probability that the speaker has finished. LiveKit's current detector is an audio model: it encodes the caller's audio directly, so intonation and rhythm count, not only the words. A trailing "uh" with flat pitch reads as "still going". A falling "Maple Street." reads as done.
+
+The session uses that probability to pick the wait. In the code that ships with livekit-agents 1.8.5, a prediction is requested once VAD has seen 200 ms of silence. When VAD reports end of speech, the session reads the probability:
+
+- above the model's threshold: commit after the short delay (0.3 s by default when a turn detector is set),
+- below it: keep waiting, up to the long delay (2.5 s by default), and cancel the whole thing the moment the caller speaks again.
+
+So the detector does not make the agent faster on clean answers. It makes it patient on unfinished ones. That is the trade, and it is the one a caller notices.
+
+Wiring it in is one argument:
+
+```python
+from livekit.agents import Agent, inference
+
+
+class FurnaceLine(Agent):
+    def __init__(self) -> None:
+        super().__init__(
+            instructions=INSTRUCTIONS,
+            turn_handling={"turn_detection": inference.TurnDetector()},
+        )
+```
+
+Setting it on the `Agent` rather than the `AgentSession` matters if, like our playground, one worker serves several agents and only some of them should wait for the caller. The agent-level setting wins over the session's.
+
+## Running the silence timer in shadow
+
+"The turn detector is better" is a claim. A shadow endpointer turns it into a measurement on your own calls.
+
+The idea: keep the real session on the turn detector, and record where a plain silence timer would have ended the turn on the same audio. Nothing changes for the caller. You just get a second opinion in the logs.
+
+In LiveKit Agents you do not need a second VAD for this. The session already emits `user_state_changed` with `listening` at the moment VAD reports end of speech, which is exactly where a VAD-only endpointer would have committed. If the caller then goes back to `speaking` before the turn commits, that was a cut-off the detector prevented.
+
+```python
+class TurnTimeline:
+    def user_state(self, state: str, at: float) -> None:
+        if state == "speaking":
+            if self.turn is None:
+                self.turn = {"start": at, "pauses": []}
+            elif self.turn["pauses"] and self.turn["pauses"][-1]["resumed"] is None:
+                # They kept going after a pause the timer would have cut.
+                self.turn["pauses"][-1]["resumed"] = at
+                self.saved += 1
+        elif state == "listening" and self.turn is not None:
+            self.turn["pauses"].append({"cut": at, "resumed": None, "heard": self.heard()})
+
+    def commit(self, text: str, at: float) -> None:
+        self.turn["commit"] = at  # where the detector actually ended the turn
+        self.turns += 1
+        self.turn = None
+```
+
+Two more signals make the timeline worth looking at:
+
+1. **The transcript at the cut.** Keep the latest interim and final transcripts as they arrive. At each `listening` event, snapshot them. That is the half sentence the timer would have sent to the LLM: "Yeah, it's 42".
+2. **The detector's verdict.** The probability is not a public session event, but the detector is a plain class. A small subclass wraps the stream's `predict()` and reports each answer:
+
+```python
+class WatchedTurnDetector(inference.TurnDetector):
+    def stream(self, **kwargs):
+        stream = super().stream(**kwargs)
+        predict = stream.predict
+
+        def watched():
+            future = predict()
+
+            def report(done):
+                event = done.result() if not done.cancelled() else None
+                # A cancelled request (the caller spoke again) or a fallback
+                # default carries no inference timing: skip it, do not draw a guess.
+                if event and (event.inference_duration or event.detection_delay):
+                    threshold = stream._opts.thresholds.lookup(None)
+                    self.on_prediction(event.end_of_turn_probability, threshold)
+
+            future.add_done_callback(report)
+            return future
+
+        stream.predict = watched
+        return stream
+```
+
+The commit itself is `Agent.on_user_turn_completed`, which the session calls once the turn is decided.
+
+The full module is about 230 lines in the [furnace repair demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/furnace-repair) (`turns.py`), with unit tests that replay event sequences with a fake clock. It only watches. If it throws, the call goes on.
+
+## Try it
+
+Call the line and give a made-up address the way you would on a bad night: pauses, "uh", a correction. While you talk, the window stays warm. When you pause, frost creeps in, and where a silence timer would have ended your turn, the half sentence it would have sent freezes into a block of ice. The dial is the turn detector: its needle is how sure the model is that you are done, and the notch is the threshold it needs. Keep talking and the ice thaws; when the detector ends the turn, your whole sentence is written on the glass.
+
+<PlaygroundDemo demo="furnace" />
+
+Two things to look for. First, the probability at a mid-sentence pause should sit well below the threshold, which is why the agent waits. Second, on a clean "yes" both markers land in nearly the same place: the detector costs you almost nothing when you are actually done.
+
+## The memory bill, and why the hosted demo uses the cloud model
+
+The detector comes in two versions. `v1` is the full model served on LiveKit Inference. `v1-mini` runs locally on CPU inside the agent process. `inference.TurnDetector()` picks for you: the full model in LiveKit Cloud and in `dev` mode with Cloud credentials, the mini model when you run `start` anywhere else.
+
+Our playground worker runs every demo in one process on a service capped at 500 MB, so I measured before shipping. With livekit-agents 1.8.5 on Python 3.11, the idle worker sat at 217 MB resident. Loading `v1-mini` took it to 457 MB, and the first predictions to 477 MB. Each prediction on 1.2 s of audio took 20 to 70 ms on four cores, and a second instance in the same process shared the weights. That is roughly 250 MB for one feature, on a service that also has to hold two live calls.
+
+So the hosted demo pins the full model and turns the local fallback off:
+
+```python
+inference.TurnDetector(version="v1", local_fallback=False)
+```
+
+That adds about 5 MB per call (a WebSocket and a small audio buffer) and nothing at idle. The cost of `local_fallback=False` is explicit: if LiveKit Inference is unreachable, or the free allowance for agents outside LiveKit Cloud runs out, the session logs a warning and commits turns on the endpointing delay alone. The panel says "Detector off" when that happens, so the demo never pretends.
+
+For a production deployment on your own machines, the mini model is the better default: no network hop, no allowance. Size the box for the extra memory and use compute-optimized instances rather than burstable ones, as the [LiveKit docs](https://docs.livekit.io/agents/logic/turns/turn-detector/) recommend, so a CPU-credit cliff does not turn into prediction timeouts.
+
+## Tuning, and what not to tune
+
+Three knobs exist. Touch them in this order:
+
+| Knob | Default with the detector | When to change it |
+| --- | --- | --- |
+| `endpointing.max_delay` | 2.5 s | Callers read long numbers (account, VIN, policy). Raise it so the longest pause still fits. |
+| `endpointing.min_delay` | 0.3 s | Rarely. It is the floor after a confident "done". |
+| `unlikely_threshold` | calibrated per language | Last. LiveKit logs a warning when you override it, because the defaults are calibrated per model. |
+
+Two things that help more than any knob:
+
+- **Read back what matters.** The furnace agent repeats the address and the callback digits ("7 0 5, 5 5 5, 0 1 4 2") before it books. A detector reduces cut-offs; a read-back catches the ones that still happen and the STT errors besides.
+- **Validate in the tool.** The ticket tool rejects a nine-digit phone number with a sentence the model can say ("heard 9 digits; a callback number needs 10"). If the caller was cut off mid-number, this is where you find out.
+
+## What this means for you
+
+1. **Count your cut-offs before you argue about them.** Log `user_state_changed` and your commits for a day, and count turns where the caller resumed after a VAD end of speech. That number is your case for a turn detector, or proof you do not need one.
+2. **Turn on the detector per agent, not per worker.** Put it where callers give details (intake, dispatch, payments) and measure the memory it costs your process before it reaches production.
+3. **Keep the read-back.** Better endpointing makes cut-offs rarer. Confirming the address makes them harmless.
+
+The demo source runs with `uv sync` and `uv run python agent.py console` once you add LiveKit, Deepgram, OpenAI and Cartesia keys. The [turn detector docs](https://docs.livekit.io/agents/logic/turns/turn-detector/) cover versions, thresholds and fallback, and LiveKit's [write-up on end-of-turn detection](https://livekit.com/blog/solving-end-of-turn-detection) covers how the audio model was trained and evaluated.
+
+If your agent takes addresses, numbers or anything a caller has to think about, endpointing is one of the first things we measure in a [production readiness review](/contact).

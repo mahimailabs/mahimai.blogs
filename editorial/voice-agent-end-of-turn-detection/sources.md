@@ -1,0 +1,8 @@
+# Sources
+
+- LiveKit turn detector docs, https://docs.livekit.io/agents/logic/turns/turn-detector/ : v1 vs v1-mini, default version selection, endpointing defaults with the detector (0.3 s / 2.5 s vs 0.5 s / 3.0 s), VAD min_silence_duration >= 0.25 s and Silero default 0.55 s, fallback behaviour, compute-optimized instance advice, threshold overrides.
+- LiveKit quotas and limits, https://docs.livekit.io/deploy/admin/quotas-and-limits/ : v1 free for agents deployed to LiveKit Cloud; 7,500 free requests per month for local development; falls back to v1-mini when exhausted.
+- LiveKit blog, https://livekit.com/blog/solving-end-of-turn-detection : linked for the model architecture and evaluation; no numbers quoted from it.
+- livekit-agents 1.8.5 source (installed package): MIN_SILENCE_DURATION_MS = 200 in livekit/agents/inference/eot/base.py (prediction requested after 200 ms of silence); audio_recognition.py picks max_delay when probability < unlikely_threshold; agent_activity.py resolves agent-level turn_detection before the session's; detector.py warns on threshold override and documents local_fallback=False.
+- Memory measurement (this thread, 2026-10-09): Python 3.11, livekit-agents 1.8.5, the playground worker (hosted.py) plus Silero VAD = 217 MB RSS; after livekit.local_inference.EOT() = 457 MB; after three predictions on 1.2 s of audio = 477 MB; predictions 23 to 66 ms on 4 cores; a second EOT instance did not add RSS. Cloud v1 stream with local_fallback=False: +5 MB, degraded cleanly on 401.
+- Demo code: https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/furnace-repair (live once the worker PR merges).

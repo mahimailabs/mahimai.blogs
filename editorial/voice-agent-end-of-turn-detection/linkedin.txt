@@ -1,0 +1,16 @@
+"Yeah, it's 42... uh... Maple Street."
+
+Two pauses, each over half a second. A voice agent on a silence timer hears "Yeah, it's 42", decides you are done, and starts talking over you. On the one answer it cannot get wrong.
+
+We built an emergency furnace line to show the fix, and to measure it:
+→ LiveKit's audio turn detector decides when the caller is done
+→ a plain silence timer runs in shadow on the same audio and only watches
+→ every pause where the timer would have cut you off gets a marker, the half sentence it would have sent, and the detector's probability at that moment
+
+The detector does not make clean answers faster. It makes unfinished ones patient. That is the trade callers notice.
+
+One number before you ship it: the local v1-mini model took our worker from 217 MB to 477 MB resident. On a 500 MB service, that decided it. The hosted demo uses the full model on LiveKit Inference with the local fallback off, about 5 MB per call.
+
+How many of your calls have a caller resuming after the agent already decided they were done?
+
+https://mahimai.ca/blog/voice-agent-end-of-turn-detection
