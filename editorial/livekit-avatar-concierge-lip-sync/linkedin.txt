@@ -1,0 +1,16 @@
+Your avatar agent stopped talking. Its face didn't.
+
+Put an avatar on a LiveKit voice agent and the avatar is not a renderer. It is a third participant in the room. Your agent streams audio to it, and it publishes the voice and the face to the caller.
+
+That moves three things you used to get for free:
+→ interruptions now have to stop someone else's buffer (lk.clear_buffer)
+→ the transcript has to be cut where the face stopped, not where your agent stopped sending (lk.playback_finished carries the position)
+→ latency gains a stage after TTS that none of your STT, LLM, TTS dashboards show
+
+The test I run first on any avatar agent: interrupt it mid-sentence, then ask "what did you just say?" If it repeats words the face never spoke, playback position is not reaching your chat history.
+
+We built a hotel concierge with a Spatius avatar into our playground. Ask where to eat, cut it off, book a table, and watch join time, lip start and cut-in time live beside the face.
+
+Where does your avatar's latency show up today, if anywhere?
+
+https://mahimai.ca/blog/livekit-avatar-concierge-lip-sync

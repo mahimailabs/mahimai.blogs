@@ -1,0 +1,13 @@
+1/ An avatar on a LiveKit voice agent is not a skin on the voice. It is a third participant in the room. That one fact changes how interruptions, transcripts and latency work.
+
+2/ Your agent streams TTS audio to the avatar. The avatar publishes audio and motion together, from one process, so WebRTC keeps the lips on the voice. With Spatius the browser draws the face itself.
+
+3/ Interruptions: the audio to stop is already in the avatar's buffer. The agent sends lk.clear_buffer, and the face has to stop, not just your track.
+
+4/ Transcripts: the avatar answers with lk.playback_finished and the position it reached. Without that, your agent "remembers" words the guest never heard.
+
+5/ Test: interrupt mid-sentence, then ask "what did you just say?" Words the face never spoke means the transcript is cut at the sender.
+
+6/ Latency: AvatarMetrics gives join latency and playback latency. Both sit after TTS and are invisible in STT, LLM and TTS numbers.
+
+7/ We put a hotel concierge with a Spatius avatar in our playground. Cut it off and watch the numbers: https://mahimai.ca/blog/livekit-avatar-concierge-lip-sync
