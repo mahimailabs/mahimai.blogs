@@ -115,16 +115,20 @@ The playground has a constraint the original demo doesn't: a call is one visitor
 So the hosted version swaps the diarizer for a **spoken handoff**. The visitor plays every seat and opens each part with it: "Engineer here. Her system design was solid." A small adapter matches the seat at the start of the turn, strips it, and sets the current speaker until the next handoff:
 
 ```python
+_SEAT = r"(?:the\s+)?(?P<{}>hiring manager|manager|engineer|recruiter)"
 _HANDOFF = re.compile(
     r"^\s*(?:(?:ok(?:ay)?|now|so)[\s,]+)?"
-    r"(?:(?:this is|it's|it is|switch(?:ing)? to|speaking as|as|over to)\s+)?"
-    r"(?:the\s+)?(hiring manager|manager|engineer|recruiter)\b"
-    r"(?:\s+(?:here|speaking))?[\s,.:;!-]*",
+    r"(?:"
+    r"(?:i['\u2019]m|i am|this is|it['\u2019]s|it is|switch(?:ing)? to|speaking as|as|over to)\s+"
+    + _SEAT.format("cued")
+    + r"\b(?:\s+(?:here|speaking)\b)?"
+    r"|" + _SEAT.format("bare") + r"(?:\s+(?:here|speaking)\b|\s*(?=[,.:;!-]|$))"
+    r")[\s,.:;!-]*",
     re.IGNORECASE,
 )
 ```
 
-It only matches at the start of a turn. "I think the engineer liked her" stays a line by the current seat instead of switching seats. A bare "Recruiter here" changes the seat and ends the turn without a transcript line.
+It only matches at the start of a turn. "I think the engineer liked her" stays a line by the current seat instead of switching seats. A seat name with no cue ("I'm", "this is") only counts when a pause or "here" follows it, so "Manager expects stronger tests" stays a line too. A bare "Recruiter here" changes the seat and ends the turn without a transcript line.
 
 The adapter is short, and it exposes the same attributes the agent already reads from the diarizer (`current_speaker`, `display_speaker()`, `talk_time_items()`). Talk time becomes each seat's share of words rather than seconds. Everything else, from the silent hook to the label in context to the scorecard tool, is the contributed agent's own code. That is the useful property of the sidecar design: the source of the labels is swappable, and the rest of the agent doesn't know or care.
 
