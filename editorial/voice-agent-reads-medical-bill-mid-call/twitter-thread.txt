@@ -1,0 +1,12 @@
+1/ Most voice agents handle "I don't understand my medical bill" by asking the caller to read numbers aloud. Ours lets them show it, mid-call. Here is the pattern, and why the image never touches the voice model's context.
+
+2/ The file travels inside the call: the browser sends it on a LiveKit byte stream to the agent, and only the agent. No upload endpoint, no bucket, no signed URL. The handler checks sender, type and real size before reading a byte further.
+
+3/ Then one gpt-4.1-mini call copies every line into a strict schema. The prompt says "copy what is printed; never calculate". We want the bill's errors, not a model that quietly fixes them.
+
+4/ Plain Python audits it: same code same day twice, in-network you-owe above allowed minus plan paid, totals that don't add up. The model explains findings. It never decides them.
+
+5/ The voice model's context lists the lines but none of the amounts. To say a number it calls show_lines, which returns the figures and highlights that line on screen. Every dollar it speaks is a logged tool result.
+
+6/ Measured: 44 of 44 amounts read right across three samples, 2 to 3.4 s per read, about $0.001 each. Try it:
+https://mahimai.ca/blog/voice-agent-reads-medical-bill-mid-call
