@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/flight-rebooking.webp in mahimai.ca, which currently holds a flat placeholder drawn in code in the style of claim-intake.webp.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light, pale light wood desk, a sprig of lavender in a small ceramic pot, muted lavender accents.
+
+Subject: an airport gate desk. On the wall, a dark departures board with three blank rows, the middle row glowing a soft coral, the row below a soft lavender. On the desk, a paper boarding pass with a lavender arrow between two blank blocks, a cream hard-shell carry-on suitcase with a lavender tag, and a matte black desk microphone with a thin lavender ring, like the coffee counter card.
+
+Composition: objects left to right along the desk, generous empty wall above for overlay, eye-level, shallow depth of field. Late-afternoon storm light, slightly grey, from the upper right. Calm, competent mood. No people, no readable text, no airline logos or real brand marks, no UI.

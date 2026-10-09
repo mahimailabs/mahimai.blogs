@@ -1,0 +1,13 @@
+1/ A storm cancels a flight. 400 people call. Your voice agent fails, and not because the model was wrong. It goes silent. Here is how we keep a rebooking agent talking through a slow search and a provider outage.
+
+2/ Silence one: a tool that blocks the turn. A fare search takes 8 seconds under load. The caller hears nothing, says "hello?", hangs up.
+
+3/ Fix: async tools. In LiveKit, calling ctx.update() inside a tool releases the turn. The agent keeps answering ("can I keep my seat?") while the search runs, and the result arrives as a follow-up.
+
+4/ Silence two: a provider fails mid-call. LiveKit's FallbackAdapter moves the same request to a backup, then probes the primary in the background and hands traffic back when it recovers.
+
+5/ Settings that matter: attempt_timeout to what a caller tolerates, zero retries on a struggling primary, and sticky only when a model change mid-call would be noticeable.
+
+6/ Opinion: a fallback at the same provider is not a fallback. Put the backup in a different failure domain.
+
+7/ Try it: rebook a made-up flight, then say "knock out the voice" and hear the backup take over. https://mahimai.ca/blog/voice-agent-async-tools-failover-flight-rebooking
