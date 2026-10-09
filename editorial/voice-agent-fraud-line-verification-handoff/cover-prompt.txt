@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/card-fraud-line.webp in mahimai.ca, which currently holds a black-stage diagram placeholder.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light and leaf shadows, pale marble or light wood desk, muted lavender accents.
+
+Subject: a plain matte payment card with no bank name or numbers, a smartphone lying face up showing an abstract alert card with a lavender shield shape (no readable text), a small brass padlock, and a matte black desk microphone with a thin lavender ring, like the coffee counter card.
+
+Composition: objects arranged left to right along the desk, generous empty wall above for overlay, eye-level, shallow depth of field. Evening light from the upper left. Calm, alert mood. No people, no readable text, no logos, no real bank or card network marks, no UI chrome.

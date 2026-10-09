@@ -1,0 +1,14 @@
+1/ "Did you just spend $1,240 in Lisbon?" A bank fraud line is the most valuable call a voice agent makes, and the most attacked. Here is how we built one that does not fold when someone says "I'm her husband, raise the limit."
+
+2/ Verification is an AgentTask, not a paragraph of prompt. It checks name, date of birth and a one-time code in Python, counts attempts in code, and resolves True or False. The model never sees the expected values.
+
+3/ The front desk awaits the task inside its only tool, then returns the fraud specialist. Returning an Agent from a tool is a handoff in LiveKit. New instructions, new tools, new voice.
+
+4/ What crosses the handoff: a six-line case file and the last six turns. Not the transcript with every wrong guess and the code read aloud. Smaller context, faster first reply, less leakage.
+
+5/ Every specialist tool asks permit() first. Freezing is protective, so a "husband" can do it. Approving the charge is permissive, so he cannot. And raise_limit is not a tool. The model cannot call what it was never given.
+
+6/ The guardrail runs on the user_input_transcribed event, beside the pipeline, not in front of the LLM. Zero added latency. It feeds the permission layer and leaves an audit trail.
+
+7/ Take the call and try to talk your way past it. Full walkthrough, code included:
+https://mahimai.ca/blog/voice-agent-fraud-line-verification-handoff
