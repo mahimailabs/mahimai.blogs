@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/pronunciation-coach.webp in mahimai.ca, which currently holds the black-stage diagram as a placeholder.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light and leaf shadows, pale light wood desk, a sprig of lavender in a small ceramic pot, muted lavender accents.
+
+Subject: an open notebook with blank ruled lines, a tablet leaning on a stand showing only abstract coloured bars of different heights (one short bar in lavender), a pair of over-ear headphones, and a matte black desk microphone with a thin lavender ring, like the coffee counter card.
+
+Composition: objects arranged left to right along the desk, generous empty wall above for overlay, eye-level, shallow depth of field. Morning light from the upper right. Calm, focused, study-room mood. No people, no readable text, no letters on the tablet or notebook, no logos, no flags, no UI chrome.

@@ -1,0 +1,177 @@
+---
+title: 'Pronunciation Scoring with Word-Level STT Confidence'
+description: 'Build a speaking coach with LiveKit and Deepgram: score every word from recognition confidence, drill only the weak ones, and adapt the level.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'edtech', 'deepgram', 'pronunciation']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** Your speech recognizer already knows which words a learner mispronounced. Deepgram returns a confidence for every word, and a word the model had to guess comes back low. Line those words up against the sentence the learner was asked to read, score each one in code, and hand the LLM only the one or two weakest to coach. Re-read the line to prove the fix, and move the level from the first read. You can try the coach in English or French below.
+
+"Great job! Your pronunciation is improving." That is what most speaking practice features say, whatever you said.
+
+Every language-learning product wants a speaking mode, and most ship one that grades the whole sentence or nothing. The learner reads "I think it is Thursday", says "I sink it is Thursday", and gets a thumbs up, or a 72 with no idea which word cost them. A good tutor does something narrower: they point at "think", have you say it three times, then ask for the whole sentence again.
+
+This post walks through the [pronunciation coach demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/pronunciation-coach) in awesome-voice-apps: Parlo, a made-up language app, with a coach that does exactly that. Four patterns do the work: word-level confidence, alignment against the target line, scoring in code with coaching by the model, and a drill loop that adapts the level.
+
+## The signal is already in your STT response
+
+A streaming recognizer does not only return text. For each final segment, Deepgram returns every word with timings and a confidence between 0 and 1. In LiveKit Agents 1.8, those land on `SpeechData.words` as `TimedString` objects, each with a `.confidence`.
+
+Clear, native-like speech comes back near 1.0. A word the acoustic model was unsure about, because the vowel was off or the "th" came out as "s", comes back lower. A word it heard as a different word shows up as that different word. That is three distinct failure signals, for free, in a response you are already receiving.
+
+The coach keeps them by overriding the STT node:
+
+```python
+class PronunciationCoach(Agent):
+    async def stt_node(self, audio, model_settings):
+        # Keep every final word with its confidence until the turn ends. One read
+        # can arrive as several final segments.
+        async for event in Agent.default.stt_node(self, audio, model_settings):
+            if event.type == stt.SpeechEventType.FINAL_TRANSCRIPT and event.alternatives:
+                self.hear(event.alternatives[0])
+            yield event
+
+    def hear(self, alternative: stt.SpeechData) -> None:
+        for word in alternative.words or []:
+            self._heard.append((str(word), word.confidence))
+```
+
+Two details matter. First, one sentence read aloud often arrives as two or three final segments, so the words accumulate until the turn ends instead of being scored per segment. Second, the STT is plain Nova-3 with **no keyterms**. Keyterm prompting biases the recognizer toward words you expect, which is exactly what you want on a pharmacy line and exactly what you do not want here: a recognizer nudged toward "think" will hear "think" when the learner said "sink", and the error disappears.
+
+## Line up what was heard against what was asked
+
+Confidence alone is not a score. The learner might skip a word, add "um", or say a different word entirely. So the coach aligns the heard words against the target line with `difflib.SequenceMatcher`, on a spelling-insensitive key (lowercase, no accents, no punctuation):
+
+```python
+def align(target: list[str], heard: list[tuple[str, float]]) -> list[dict]:
+    tkeys = [key(w) for w in target]
+    heard = [(w, c) for w, c in heard if key(w)]
+    hkeys = [key(w) for w, _ in heard]
+    scored = [{"word": w, "score": 0.0, "status": "missed"} for w in target]
+    matcher = difflib.SequenceMatcher(None, tkeys, hkeys, autojunk=False)
+    for op, i1, i2, j1, j2 in matcher.get_opcodes():
+        if op not in ("equal", "replace"):
+            continue
+        for i, j in zip(range(i1, i2), range(j1, j2)):
+            said, conf = heard[j]
+            # A near spelling ("color", "seche") is the same sound written differently.
+            if op == "equal" or difflib.SequenceMatcher(None, tkeys[i], hkeys[j]).ratio() >= 0.8:
+                score = _conf(conf)
+                status = "clear" if score >= CLEAR else "close" if score >= PASS else "weak"
+                scored[i].update(score=score, status=status)
+            else:
+                scored[i].update(status="misheard", heard=said[:24])
+    return scored
+```
+
+Every target word ends up in one of five states:
+
+| State | What happened | Score |
+| --- | --- | --- |
+| clear | Heard, confidence at or above 0.85 | the confidence |
+| close | Heard, between 0.70 and 0.85 | the confidence |
+| weak | Heard, below 0.70 | the confidence |
+| misheard | Heard as a different word ("sink" for "think") | 0, and we keep what was heard |
+| missed | Not heard at all | 0 |
+
+The accent-stripping key matters more in French than you would expect. "sèches" and "seches" are the same sound, and a learner should not lose points because the recognizer dropped an accent. Extra words ("um", "sorry") are ignored rather than penalized. The thresholds are starting points for Nova-3 on read speech; you tune them on recordings of your own learners, per language.
+
+The same alignment also answers a question every voice tutor hits: was that a read, or was the learner talking? "Can you say that again?" matches almost none of "I think it is Thursday", so if fewer than a third of the target words are found, the turn is treated as conversation and nothing is scored.
+
+## Score in code, coach with the model
+
+The LLM in this pipeline never hears audio. It receives a transcript, and a transcript of "I sink it is Thursday" has no idea how "Thursday" sounded. Asking the model to judge pronunciation from text gets you confident, invented feedback. So scoring runs in code, at the one hook that fires after the user's turn and before the reply:
+
+```python
+async def on_user_turn_completed(self, turn_ctx, new_message) -> None:
+    heard, self._heard = self._heard[-60:], []
+    state = self.session.userdata
+    result = coach.score_turn(state, heard)
+    if result is None:
+        return  # talk, not a read: let the conversation carry on
+    publish_coach(self.room, state)
+    turn_ctx.add_message(role="system", content=coach.brief(state, result))
+```
+
+`score_turn` updates the lesson state, and `brief` writes the one system line the model gets for this turn:
+
+```text
+Scored read: 68/100. Weak words: 'think' (sounded like 'sink'), 'Thursday' (score 52).
+This line trains th. Tip: Tongue tip lightly between the teeth, then blow air.
+Coach only those words and nothing else: say each one slowly, give one short
+mouth-position tip, then ask them to say just: think, Thursday.
+```
+
+The system prompt adds one rule on top: never correct a word the system line says was clear. That combination is what makes the feedback targeted. The model is good at phrasing a tip warmly and briefly; it is bad at deciding what to coach. Code decides, the model phrases.
+
+The same split pays off in operations. Scores are deterministic, so you can unit-test the whole lesson without a model, log scores without logging audio, and change the coaching voice without touching the grading.
+
+Because the reply depends on the score, the agent also turns off preemptive generation. LiveKit can start drafting a reply before the turn is confirmed, which saves latency on most agents. Here every draft would be discarded the moment the score lands, so it is only extra LLM spend:
+
+```python
+super().__init__(
+    instructions=INSTRUCTIONS,
+    turn_handling={
+        # Learners pause mid-line while reading; wait before ending the turn.
+        "endpointing": {"min_delay": 0.9, "max_delay": 3.0},
+        # The reply depends on the score, so a preemptive draft is always wasted.
+        "preemptive_generation": {"enabled": False},
+    },
+)
+```
+
+The longer endpointing delay is the other reading-specific change. People reading a sentence in a second language pause between words. With the default half-second delay, "Les chaussettes de l'archiduchesse... sont sèches" becomes two turns and two half-scored reads. Both settings are per agent, so the rest of a multi-agent session keeps its defaults.
+
+## The drill loop, and a level that moves
+
+A score on its own does not teach anything. The loop that does is small enough to fit in one state machine:
+
+1. **Read.** The learner reads the line. If every word clears 0.70, the line is done.
+2. **Drill.** Otherwise the coach picks the one or two lowest words and asks for just those. A drill that passes moves on; a drill that fails twice moves on anyway, because a learner stuck on one word for a minute quits.
+3. **Re-read.** The learner reads the whole line again, and the panel shows each drilled word before and after.
+4. **Adapt.** The level moves from the **first** read of each line: 0.88 or better moves up a level, below 0.55 moves down.
+
+Using the first read for the level, not the re-read, is deliberate. The re-read measures whether the drill worked. The first read measures what the learner can do cold, and that is what difficulty should follow. The lines themselves are picked for the sounds each audience gets wrong: "th", "r" against "l" and "v" against "w" for English learners; the French "r", "u" against "ou" and the nasal vowels in "un bon vin blanc" for French learners.
+
+## Try it
+
+Sign in to use the short daily allowance across the playground demos. Say English or French, then read the line on screen. Nothing is recorded or saved.
+
+<PlaygroundDemo demo="pronounce" />
+
+Things worth trying:
+
+- Say "sink" instead of "think" on purpose. The panel shows what it heard, and the coach drills only that word.
+- Mumble one word and say the rest clearly. Only the mumbled word should come back.
+- Read a whole line cleanly on the first try and watch the level move up.
+- Ask "can you say that again?" in the middle of a drill. It is not scored.
+- Switch to French and try "Il y a un bon vin blanc". The nasal vowels are where English speakers lose points.
+
+## When confidence is not enough
+
+Recognition confidence is a proxy, and it is worth being honest about where it breaks:
+
+| | Word confidence (this demo) | Phoneme-level assessment |
+| --- | --- | --- |
+| What you get | One number per word, plus what was heard instead | Scores per sound, often with fluency and prosody |
+| Extra cost | None, it is in the STT response | A separate assessment service or model |
+| Tells you which word | Yes | Yes |
+| Tells you which sound | No, the line's focus sound stands in | Yes |
+| Language coverage | Whatever your STT supports | Depends on the service |
+| Works in a live call | Yes, per turn | Usually after the utterance |
+
+For most product teams, word confidence is the right first version: it ships on the stack you already run, and "which word" is the feedback learners act on. Move to phoneme-level scoring when your learners need to know which sound inside the word is wrong, or when you grade for certification and a score has to be defensible. Either way, calibrate on your own learners: confidence distributions shift by first language, age and microphone, and a threshold tuned on adult native speakers will fail a child reading on a tablet.
+
+## What this means for you
+
+1. **Use the per-word confidence you already receive.** It is the cheapest pronunciation signal there is, and most agents throw it away.
+2. **Keep grading out of the model.** Score in code at the end of the turn, then tell the LLM exactly which words to coach and forbid it from inventing others.
+3. **Tune turn-taking for reading.** A longer endpointing delay and no preemptive replies are two lines of config that decide whether reads get scored whole.
+
+The [pronunciation coach source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/pronunciation-coach) runs with `uv sync` and `uv run python agent.py console` once you add Deepgram, OpenAI, Cartesia and LiveKit keys, and its scoring tests need no keys at all.
+
+If you are adding speaking practice to a learning product, the signal choice, the thresholds and the turn-taking are where we start a [production readiness review](/contact).
