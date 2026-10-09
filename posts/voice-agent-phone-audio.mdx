@@ -1,0 +1,196 @@
+---
+title: 'Why Voice Agents Break on Phone Audio, and the Fixes'
+description: 'A storm outage line on a simulated landline and bad cell: what 8 kHz audio, packet loss and jitter do to STT, and the telephony fixes that win it back.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'telephony', 'speech-to-text', 'packet-loss']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** Most voice agents are tested on browser audio and deployed on the phone network, which halves the bandwidth, quantises every sample to 8 bits and, on a weak cell signal, drops one packet in six. Put a simulated phone line in front of your agent before you trust any accuracy number. On our simulator, a bad cell line took Whisper's word error rate from 10.0% to 15.5%, and three receive-side fixes (an adaptive jitter buffer, forward error correction and loss concealment) brought it back to 11.5%. You can move your own call onto that line below.
+
+A utility's outage line gets its busiest hour when the weather is worst. The callers are in a dark kitchen, on a phone at one bar of signal, reading an account number off a bill by candlelight. That is the call your voice agent has to get right, and it is the call nobody tested, because the demo ran in Chrome on office Wi-Fi.
+
+This post walks through the [storm outage line](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/storm-outage-line) in awesome-voice-apps: a LiveKit agent that logs an outage, with a phone network simulated between the caller and the agent. You read a service card, move your own call onto a landline or a bad cell connection, read it again, and watch the score.
+
+## What the phone network does to your audio
+
+A browser call reaches the agent as wideband Opus, usually 48 kHz, with the network handled by WebRTC's own jitter buffer and concealment. A phone call is different in three ways, and each one hurts speech-to-text (STT) differently.
+
+1. **Bandwidth.** The public phone network carries [G.711](https://www.itu.int/rec/T-REC-G.711) at 8 kHz, which keeps everything below 4 kHz and throws away the rest. That is where "s", "f" and "th" live. "Thistlewood" and "this will wood" sound much closer at 8 kHz than they do on a headset.
+2. **Quantisation.** G.711 stores each sample in 8 bits with mu-law companding: fine steps for quiet sounds, coarse steps for loud ones. Speech stays intelligible to people; a model trained mostly on wideband audio hears a slightly noisier version of every phoneme.
+3. **The network.** On a weak cell signal, packets arrive late or not at all, and they go missing in bursts (a fade, a handover), not one at a time. A receiver with a shallow jitter buffer drops late packets as if they were lost. Each 20 ms gap is a hole in a word.
+
+The third one is the expensive one, because it does more than smudge words. A gap looks like a pause. Voice activity detection (VAD) sees 60 ms of silence in the middle of "four four seven one" and the endpointer may decide the caller has finished. The agent cuts in, the caller starts again, and your handle time goes up on the night you have the most calls.
+
+I covered the first two in [Building a phone line in PyTorch](/blog/building-a-phone-line-in-pytorch). This demo adds the network, live, inside a running agent.
+
+## Put the line where VAD can hear it
+
+The obvious place to degrade audio in LiveKit Agents is the [`stt_node`](https://docs.livekit.io/agents/logic/nodes/), which exists for audio pre-processing. It is the wrong place for this. The `stt_node` feeds the recognizer only; VAD and turn detection read the room audio separately. A simulated line in `stt_node` gives you phone-quality transcripts with browser-quality endpointing, which hides exactly the failure above.
+
+So the demo wraps the session's audio input instead. `AudioInput` in LiveKit Agents is chainable, so a wrapper can sit between the room's microphone track and everything that consumes it:
+
+```python
+from livekit.agents.voice.io import AudioInput
+
+
+class LineAudioInput(AudioInput):
+    """Put a PhoneLine between the room's microphone track and the agent."""
+
+    def __init__(self, line: PhoneLine, source: AudioInput) -> None:
+        super().__init__(label="phone-line", source=source)
+        self._line = line
+        self._ready: deque[rtc.AudioFrame] = deque()
+
+    async def __anext__(self) -> rtc.AudioFrame:
+        while not self._ready:
+            frame = await self.source.__anext__()
+            self._line.note_rate(frame.sample_rate)
+            self._ready.extend(self._line.process(frame))
+        return self._ready.popleft()
+```
+
+Installing it is one assignment, done when the agent enters:
+
+```python
+def install_line(self) -> None:
+    source = self.session.input.audio
+    if source is None or isinstance(source, LineAudioInput):
+        return
+    self.session.input.audio = LineAudioInput(self.line, source)
+```
+
+One detail matters here: an STT stream refuses frames whose sample rate changes mid-stream. The line therefore resamples down to 8 kHz, does its damage, and resamples back up to the input rate. Every consumer sees one constant rate, whichever line the caller picks.
+
+## The line, packet by packet
+
+`PhoneLine` cuts the 8 kHz audio into 20 ms packets (160 samples, the usual RTP size for telephone audio) and sends each through a codec and a network.
+
+The codec is a mu-law round trip:
+
+```python
+def mu_law(samples: np.ndarray, mu: int = 255) -> np.ndarray:
+    """Round-trip int16 audio through 8-bit mu-law companding."""
+    x = samples.astype(np.float32) / 32768.0
+    y = np.sign(x) * np.log1p(mu * np.abs(x)) / math.log1p(mu)
+    y = np.round(y * 127.0) / 127.0  # 8 bits: sign plus 7-bit magnitude
+    x = np.sign(y) * np.expm1(np.abs(y) * math.log1p(mu)) / mu
+    return np.clip(x * 32768.0, -32768, 32767).astype(np.int16)
+```
+
+The network is a two-state Gilbert-Elliott model, the standard way to get bursty loss: a good state that loses 1% of packets, a bad state that loses 60%, and transitions that keep the line in the bad state for a few packets at a time. Each packet also gets a random delay; anything later than the jitter buffer is dropped.
+
+```python
+def _arrives(self) -> tuple[bool, bool]:
+    """Return (lost, late) for the next packet on the cell line."""
+    if self._bad:
+        self._bad = self._rng.random() >= TO_GOOD
+    else:
+        self._bad = self._rng.random() < TO_BAD
+    lost = self._rng.random() < (LOSS_BAD if self._bad else LOSS_GOOD)
+    delay = abs(self._rng.gauss(0.0, JITTER_SD))
+    if self._rng.random() < SPIKE_CHANCE:
+        delay += SPIKE_DELAY
+    late = not lost and delay > (ADAPTIVE_BUFFER if self.fixes else STATIC_BUFFER)
+    return lost, late
+```
+
+With these numbers about 7.5% of packets are lost in the network and, behind a 60 ms buffer, another 9 to 10% arrive too late. That is a bad cell call, not a broken one. It is a simulation built for a demo, and the constants sit at the top of [`phone_line.py`](https://github.com/mahimairaja/awesome-voice-apps/blob/main/demos/storm-outage-line/phone_line.py) so you can set them to your own carrier's numbers.
+
+## The fixes, and which side owns them
+
+The "fixes on" switch turns on five things. Three are on the receive side of the telephony stack, two are in the agent.
+
+**Adaptive jitter buffer.** Wait up to 200 ms instead of 60 ms for a late packet. You pay in latency, so a production buffer grows only when the network is bad. On the cell line this takes late drops from about 10% to well under 1%.
+
+**Forward error correction.** [Opus in-band FEC](https://datatracker.ietf.org/doc/html/rfc6716) carries a low-bitrate copy of each packet inside the next one, so a single lost packet can be rebuilt once the next one arrives. The receiver has to wait one packet before declaring a loss:
+
+```python
+held, self._held = self._held, (packet, missing)
+if held is None:
+    return []
+previous, previous_missing = held
+if not previous_missing:
+    out = previous
+elif not missing:
+    self.stats.recovered += 1  # rebuilt from the copy in this packet
+    out = previous
+else:
+    return [self._conceal()]
+```
+
+FEC only helps on legs that negotiate Opus with FEC. A G.711 trunk has none, which is one reason the codec your SIP provider negotiates matters.
+
+**Packet loss concealment.** When neither the packet nor its copy arrived, repeat the last good audio at falling volume for about 60 ms, then go quiet. A hole of silence becomes a smear, and a smear does not look like the end of a sentence.
+
+**Keyterms from the account record.** Deepgram Nova-3 accepts [keyterm prompting](https://developers.deepgram.com/docs/keyterm). A real utility knows the caller's street from their caller ID before they say a word, so the agent primes the recognizer with it. This is the cheapest fix on the list and the one teams forget.
+
+**Longer endpointing on gappy lines.** The agent raises its minimum endpointing delay from 0.5 s to 0.9 s when the line is bad, so a dropout is not mistaken for the caller finishing.
+
+```python
+recognizer = self.stt or context.session.stt
+if isinstance(recognizer, deepgram.STT):
+    recognizer.update_options(keyterm=[card["street"], UTILITY] if fixes else [])
+delay = PHONE_ENDPOINTING if fixes and line != "web" else WEB_ENDPOINTING
+context.session.update_options(endpointing_opts={"min_delay": delay})
+```
+
+All five change mid-call. The caller says "turn the fixes on", the agent calls `set_line`, and the next reading is on the repaired line.
+
+## Score the reading, not the vibe
+
+"It sounded worse" is not a measurement. The demo gives the caller a service card with a street address and an eight-digit account number, and never shows that card to the model. After each turn, code (not the LLM) compares the STT transcript with the card, token by token, as a longest common subsequence. Numbers are normalised to single digits first, so "eighteen", "18" and "one eight" all count:
+
+```python
+assert matched(expected, tokens("18 Thistlewood Crescent, 4471 2093")) == 12
+assert matched(expected, tokens("um it's 18 this will wood crescent 4471 2 3")) == 9
+```
+
+The panel shows the score, the recognizer's confidence, how many turns the reading was cut into, and what the network did during it. The account number is also checked where it matters for the business: `report_outage` refuses an account that does not match, so a misheard digit costs the caller a repeat, as it would in production.
+
+The agent can also play the caller's reading back as it heard it. `session.say()` accepts an audio stream, so the tool hands it the clip from the line's buffer and no TTS is involved:
+
+```python
+context.session.say("(playback of the caller's line)", audio=clip(), add_to_chat_ctx=False)
+```
+
+Hearing your own voice come back through a bad cell line explains the whole problem faster than any chart.
+
+## What it measured
+
+I ran 40 utterances from LibriSpeech's validation set through each line and transcribed them offline with Whisper `base.en`, so the numbers are reproducible without an API key. The live demo uses Deepgram Nova-3, which will give different absolute numbers; the panel shows its own.
+
+| Line | Fixes | Word error rate | Audio played as silence |
+| --- | --- | --- | --- |
+| Web audio | n/a | 10.0% | 0% |
+| Landline (8 kHz, mu-law) | off | 11.8% | 0% |
+| Bad cell | off | 15.5% | 17.2% |
+| Bad cell | on | 11.5% | 0.2% |
+
+With the fixes on, FEC rebuilt 5.6% of packets and concealment filled 2.0%. Two things stand out. The codec alone costs less than people expect; the network is what hurts. And the receive-side fixes recover most of the network loss, so the bad cell line ends up close to the landline. These numbers do not include the keyterm and endpointing fixes, which only exist in the live agent.
+
+## Try it
+
+Sign in to use the daily allowance across the playground demos. Read your card on web audio first, then ask for a bad cell line, read it again, and turn the fixes on.
+
+<PlaygroundDemo demo="outage" />
+
+Things worth trying:
+
+- Read the account number fast on the bad cell line with the fixes off. Watch the reading get cut into two turns.
+- Ask it to play your line back. That is your voice as the recognizer heard it.
+- Ask for the landline. The score usually holds, which is the point: the codec is not your biggest problem.
+- Give it a wrong account number. The tool refuses it and the agent asks again.
+
+## What this means for you
+
+1. **Test on the line you deploy on.** Run your eval set through an 8 kHz codec and a lossy network before you quote an accuracy number to anyone. Put the degradation in front of VAD, not only in front of STT.
+2. **Know who owns the jitter buffer and FEC.** Ask your SIP provider which codec each leg negotiates and whether Opus FEC is on. That decision sits outside your agent and moves your error rate more than a model upgrade.
+3. **Use what you already know about the caller.** Caller ID gives you the account, the account gives you the street name, and the street name is a keyterm. Pair it with longer endpointing on bad lines.
+
+The [storm outage line source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/storm-outage-line) runs with `uv sync` and `uv run python agent.py console` once you add LiveKit, Deepgram, OpenAI and Cartesia keys, and its tests run offline. For the network side of a browser call, see [how your voice travels through WebRTC](/blog/how-your-voice-travels-through-webrtc).
+
+If your agent works in the demo and falls apart on the phone, that gap is one of the first things we measure in a [production readiness review](/contact).
