@@ -1,0 +1,20 @@
+400 people on the same cancelled flight call at once. Which part of your voice agent breaks first?
+
+Usually not the model. It is silence.
+
+Two kinds:
+→ a tool that blocks the turn while it waits 8 seconds on the booking system
+→ a provider that starts failing under the load, with nothing behind it
+
+What works:
+→ make slow tools async. In LiveKit, ctx.update() releases the turn and the search keeps running, so "can I keep my window seat?" gets answered mid-search
+→ wrap the LLM and TTS in a FallbackAdapter, lower the attempt timeout to what a caller will sit through, and turn retries on the primary off
+→ log every availability change, and decide on sticky fallback on purpose
+
+My take: a fallback at the same provider is not a fallback. Put the backup in a different failure domain.
+
+We built a flight rebooking demo for our playground. Ask to rebook, then say "knock out the voice" and hear the backup take over.
+
+What is your agent's longest silent tool call?
+
+https://mahimai.ca/blog/voice-agent-async-tools-failover-flight-rebooking
