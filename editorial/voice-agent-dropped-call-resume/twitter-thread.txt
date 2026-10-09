@@ -1,0 +1,13 @@
+1/ Six questions into a loan application, the line drops. The caller rings back and the voice agent asks for their name again. Here is how we built one that picks up at the exact question instead.
+
+2/ The call is not the unit of work. session.userdata dies with the room. The application lives in a store keyed by the caller, and the call just loads it and writes it back.
+
+3/ Write through. The tool records the answer, saves a versioned checkpoint, and only then returns. The agent never confirms an answer that is not durable.
+
+4/ Derive the resume point. The next question is the first one without an answer. No cursor to drift out of sync.
+
+5/ Carry state, not the transcript. The callback starts with ~60 tokens: answers, notes, next question. Smaller, unambiguous, and far less sensitive to store.
+
+6/ The rolling summary rides on the tool call: a note argument the model fills while it records the answer. No extra LLM request.
+
+7/ Drop a call on purpose and watch it come back, with the code: https://mahimai.ca/blog/voice-agent-dropped-call-resume

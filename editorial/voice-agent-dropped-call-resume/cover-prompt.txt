@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/loan-callback.webp in mahimai.ca, which currently holds the black-stage diagram as a placeholder.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light and leaf shadows, pale light wood desk, muted lavender accents.
+
+Subject: a small business owner's desk at the end of the day. A cream desk phone with its handset lifted off the cradle and resting beside it, its coiled cord loose. A paper application form on a clipboard with a few lines filled and a lavender bookmark tab marking a spot halfway down. A ceramic mug, a small potted plant, and a matte black desk microphone with a thin lavender ring, like the coffee counter card.
+
+Composition: objects arranged left to right along the desk, generous empty wall above for overlay, eye-level, shallow depth of field. Late afternoon light from the upper right. Calm, reassuring mood. No people, no readable text, no logos, no bank brand marks, no UI.
