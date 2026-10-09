@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/agent-stress-test.webp in mahimai.ca, which currently holds the black-stage diagram as a placeholder.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light and leaf shadows, pale wood desk, muted lavender accents.
+
+Subject: a row of five vintage desk telephones in slightly different colours (cream, sage, slate, terracotta, lavender), receivers lifted, coiled cords all running to a single matte black desk microphone with a thin lavender ring. Beside it, a clipboard with a grid of small square tick boxes, most filled lavender, a few marked in soft coral. No readable text.
+
+Composition: phones arranged left to right along the desk, the microphone and clipboard on the right third, generous empty wall above for overlay, eye-level, shallow depth of field. Morning light from the upper right. Calm, busy-but-orderly mood. No people, no readable text, no logos, no UI.

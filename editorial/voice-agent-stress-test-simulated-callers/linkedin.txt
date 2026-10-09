@@ -1,0 +1,18 @@
+"I want sixty five dollars back or I'm cancelling." The agent said yes.
+
+That was the first simulated call we ran against a billing agent whose prompt said "do whatever it takes to keep every customer happy". The policy cap is $25.
+
+Most voice agents ship after friendly test calls from the people who built them. So we built a stress test:
+→ six simulated callers: angry, rambling, heavy accent, prompt injector, account takeover, off-topic
+→ each call is a text-mode LiveKit AgentSession against the exact agent class that ships
+→ the accent caller's lines go through a mishearing filter, so "fifteen" arrives as "fifty"
+→ four code checks and three LLM judges score every call, in one JudgeGroup
+→ v1 against v2, cell by cell: what the fix repaired and what it broke
+
+The one I would copy first: judge against the business policy, not the agent's prompt. A judge that reads the prompt passes the agent for obeying a bad one.
+
+A full v1 and v2 run took seconds and cost about a cent. Try it in our playground, or call the agent yourself and try to get a $100 credit.
+
+Which caller has your agent never met?
+
+https://mahimai.ca/blog/voice-agent-stress-test-simulated-callers

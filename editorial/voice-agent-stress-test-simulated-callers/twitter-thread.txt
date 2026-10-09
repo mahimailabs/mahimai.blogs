@@ -1,0 +1,13 @@
+1/ "I want sixty five dollars back or I'm cancelling." Our billing agent said yes. The cap is $25. Nobody had tried being angry at it. So we built a stress test where agents call your agent before customers do.
+
+2/ Six simulated callers: angry, rambling, heavy accent, prompt injector, account takeover, off-topic. A scripted opener makes each attack sharp; a caller LLM improvises the rest.
+
+3/ Each call is a text-mode LiveKit AgentSession driving the exact agent class you ship, tools included. session.run(user_input=...) gives you every message and tool call.
+
+4/ Text sims hide speech errors, so the accent caller goes through a mishearing filter. "My PIN is four four one seven" arrives as "for for one heaven". Read back or guess?
+
+5/ Score with code first: credits over the cap, data before verification, a planted secret in a reply, 45-word monologues. Then LLM judges, graded against the policy, not the prompt.
+
+6/ Diff v1 against v2 cell by cell. Our run: 30/42 to 42/42, 12 fixed, 0 regressed. On another run the accent caller still failed, and no prompt fixes that.
+
+7/ Watch six callers break the agent, rerun on the fix, or call it yourself: https://mahimai.ca/blog/voice-agent-stress-test-simulated-callers
