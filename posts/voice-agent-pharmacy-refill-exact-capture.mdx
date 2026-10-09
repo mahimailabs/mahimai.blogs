@@ -1,0 +1,208 @@
+---
+title: 'Pharmacy Voice Agent: Capture Codes Exactly'
+description: 'Build a prescription refill voice agent with LiveKit: confirm every value, catch sound-alike drugs, spell codes before TTS, and redact the call log.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'healthcare', 'deepgram', 'pii-redaction']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** A voice agent that takes codes over the phone (Rx numbers, postal codes, dates of birth) fails on single characters: B against D, metformin against metoprolol. Capture each value as unconfirmed, read it back in a form that cannot be misheard, and only accept it when the caller says yes and it matches the record. Rewrite codes in the TTS node, not the prompt, and redact the transcript before any line is logged. You can refill a made-up prescription below and read the agent that does it.
+
+"Rx forty-four seventy-one D." The label says B.
+
+A refill line is the least glamorous call a pharmacy takes and one of the most common. Every value in it is short, exact and easy to mishear: a drug name with a sound-alike, an Rx number whose last letter rhymes with six others, a date of birth, a postal code. A human pharmacy assistant handles this with two habits: they read everything back, and they spell the parts that matter. Most voice agents do neither. They hear "4471-D", say "got it", and move on.
+
+This post walks through the [pharmacy refill demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/pharmacy-refill) in awesome-voice-apps. Four patterns do the work, and each one lives in code you can test without a model.
+
+## Heard is not confirmed
+
+The first decision is the data model. A field is not a value; it is a value with a state:
+
+```python
+def initial_state(profile: dict | None = None) -> dict:
+    return {
+        "profile": profile or new_profile(),
+        "fields": {
+            f: {"heard": "", "value": "", "status": "empty", "score": 0, "tries": 0} for f in FIELDS
+        },
+        "spoken": [],
+        "log": [],
+        "ref": None,
+    }
+```
+
+`status` moves through `empty`, `heard`, `confirmed`, and two failure states, `rejected` (the format is wrong) and `mismatch` (the format is fine but it is not what is on file). The model gets two tools that drive it: `capture` when the caller says something, and `confirm` only when they say yes to the read-back.
+
+```python
+def capture(state: dict, field: str, heard: str, today: date | None = None) -> str:
+    """Store what was heard, unconfirmed. Returns the tool result for the model."""
+    slot = state["fields"][field]
+    ...
+    if not ok:
+        slot.update(value="", status="rejected", score=0)
+        return f"rejected: {result}. Ask again."
+    expected = state["profile"].get(field)
+    slot.update(value=result, status="heard", score=_score(result, expected) if expected else 100)
+    readback = f'Read it back exactly as "{result}" and ask them to confirm. {note}'.strip()
+    return f"heard {FIELD_LABELS[field]}: {result}. {readback}"
+
+
+def confirm(state: dict, field: str) -> str:
+    """The caller said yes to the read-back. Check it against the file."""
+    slot = state["fields"][field]
+    if slot["status"] not in ("heard", "confirmed"):
+        return f"nothing to confirm for {FIELD_LABELS[field]} yet; capture it first"
+    expected = state["profile"].get(field)
+    if field == "pickup_store" or slot["value"] == expected:
+        slot.update(status="confirmed", score=100)
+        return f"confirmed {FIELD_LABELS[field]}"
+    slot["status"] = "mismatch"
+    return (
+        f"mismatch: the {FIELD_LABELS[field]} does not match the prescription on file. "
+        "Do not say what is on file. Ask them to read it again, one character at a time."
+    )
+```
+
+Three details matter more than they look.
+
+**The tool tells the model what to read back.** `capture` returns the normalised value and the instruction to read it back exactly. The model does not decide how to phrase "4471-B"; the tool already did.
+
+**A mismatch never leaks the record.** The tool knows the prescription on file, and the model does not. When the caller says D and the file says B, the tool says "does not match" and nothing more. If it returned the right answer, the model would helpfully say it, and your refill line becomes a way to read someone else's prescription by guessing.
+
+**The refill gate counts confirmations, not captures.** `place_refill` refuses until all five fields are `confirmed`. A field the model heard but never read back cannot slip through.
+
+This is the same split as the [claim intake agent](/blog/voice-claim-intake-fnol-agent): the model converses, the tools validate and store. The difference is the extra state between heard and stored, which is what exact-value capture needs.
+
+## Normalise what speech-to-text gives you
+
+STT does not hand you "4471-B". It hands you "4471 b", "four four seven one bee" or "4471 B as in Bravo". The normaliser collapses all of those into characters before the format check:
+
+```python
+def normalize_rx(heard: str) -> tuple[bool, str]:
+    match = RX_RE.match(_characters(heard))
+    if not match:
+        return False, "an Rx number is four digits then one letter, like 4471-B"
+    return True, f"{match.group(1)}-{match.group(2)}"
+
+
+def normalize_postal(heard: str) -> tuple[bool, str]:
+    chars = _characters(heard)
+    if not POSTAL_RE.match(chars):
+        return False, "a postal code is letter, digit, letter, digit, letter, digit, like M5V 2T6"
+    return True, f"{chars[:3]} {chars[3:]}"
+```
+
+The postal code regex encodes a real rule: Canadian postal codes never use D, F, I, O, Q or U, and never start with W or Z. That rule catches a real class of mishearing. "D5V" is not a slip of the tongue the caller made; it is a letter the STT invented, and the tool can reject it before the model reads it back.
+
+Drug names get the same treatment against a formulary, with one extra rule. If the closest match has a close second, the tool refuses to pick:
+
+```python
+if best_score < 0.9 and SequenceMatcher(None, word, second).ratio() > best_score - 0.1:
+    return (
+        False,
+        f"that could be {best} or {second}; ask which one, and to spell the first letters",
+        "",
+    )
+```
+
+And when the match is clear but the drug has a known sound-alike, the tool adds a note telling the model to spell the start of the name in its read-back. On screen the demo shows names in Tall Man lettering (metFORMIN, metOPROLOL), the convention pharmacies already use to make look-alike names differ visually.
+
+## Bias the recogniser toward the formulary
+
+Normalising after the fact fixes spacing. It cannot fix a drug name the recogniser never had a chance of hearing. Deepgram Nova-3 accepts keyterms, a list of words to favour during recognition, and the LiveKit plugin passes them straight through:
+
+```python
+KEYTERMS = [*refill.FORMULARY, "Larkfield", "Danforth"]
+
+
+def make_stt() -> deepgram.STT:
+    return deepgram.STT(model="nova-3", keyterm=KEYTERMS, smart_format=True)
+```
+
+Two choices here. The keyterms are the formulary itself, not a hand-picked list, so a new drug on the formulary is automatically a keyterm. And `smart_format` is on, so a spoken date arrives as "March 14, 1982" rather than "march fourteenth nineteen eighty two", which makes both the model's date conversion and the redaction below more reliable.
+
+Keyterm prompting is billed by Deepgram as a per-minute add-on, so check [Deepgram's pricing](https://deepgram.com/pricing) before you turn it on for every call. LiveKit's [Deepgram STT docs](https://docs.livekit.io/agents/models/stt/deepgram/) cover the parameter and how to update keyterms mid-session, which is the natural next step: boost store names only while asking for the store.
+
+## Spell codes in the TTS node, not the prompt
+
+The agent has to say "4471-B" back. Left alone, a TTS engine may read it as "four thousand four hundred seventy-one B", or swallow the letter. You could prompt the model to write "four, four, seven, one, B as in Bravo", but then the transcript, the tool arguments and the screen all disagree about what the value is.
+
+The cleaner place is the [TTS node](https://docs.livekit.io/agents/logic/nodes/): the model writes the canonical value, and the text is rewritten on its way to the voice.
+
+```python
+async def tts_node(self, text: AsyncIterable[str], model_settings: ModelSettings):
+    async def spoken() -> AsyncIterable[str]:
+        # Codes can be split across LLM chunks: rewrite whole words only.
+        buffer = ""
+        async for chunk in text:
+            ready, buffer = refill.split_ready(buffer + chunk)
+            if ready:
+                yield self.speak(ready)
+        if buffer:
+            yield self.speak(buffer)
+
+    async for frame in super().tts_node(spoken(), model_settings):
+        yield frame
+```
+
+`speakable` turns `4471-B` into "four, four, seven, one, B as in Bravo", `M5V 2T6` into "M as in Mike, five, V as in Victor. two, T as in Tango, six", and an ISO date into "March 14th, 1982". The tricky part is streaming: the LLM sends text in small chunks, and "M5V" can arrive before "2T6". `split_ready` only releases text up to the last word break, and holds back a break that sits inside a postal code:
+
+```python
+def split_ready(buffer: str) -> tuple[str, str]:
+    """Split streamed text at the last safe word break, never inside a code."""
+    cut = max(buffer.rfind(" "), buffer.rfind("\n"))
+    if cut >= 0 and _POSTAL_HEAD.search(buffer[:cut]):
+        cut = max(buffer.rfind(" ", 0, cut), buffer.rfind("\n", 0, cut))
+    if cut < 0:
+        return "", buffer
+    return buffer[: cut + 1], buffer[cut + 1 :]
+```
+
+Holding back one word costs a few milliseconds of latency. Splitting a code costs a wrong refill. The panel in the demo shows each rewrite as it happens: what the model wrote, and what the voice said.
+
+## Redact before anything is logged
+
+A refill call is full of identifiers, and a call log is where they leak: support tooling, analytics, a vendor's dashboard. The agent redacts every transcript line before it is logged or shown:
+
+```python
+def log_line(self, who: str, text: str) -> None:
+    """Redact a transcript line before it is logged or shown."""
+    clean, tags = refill.redact(text)
+    if not clean:
+        return
+    state = self.session.userdata
+    state["log"] = [*state["log"], {"who": who, "text": clean[:240], "tags": tags}][-6:]
+    logger.debug("%s: %s", who, clean)
+    publish_refill(self.room, state)
+```
+
+`redact` masks dates (written or spoken, "March 14th, 1982" and "the 14th of March"), phone numbers (as digits or as ten spoken digits), postal codes (as "M5V 2T6" or "m five v two t six") and emails. It runs on both sides of the conversation, because the agent reads the date of birth back too.
+
+Why not let the STT redact? Deepgram has a `redact` option, and it is the right tool when nothing downstream needs the value. Here the model has to see the date of birth to capture it. So the model gets the raw transcript, and everything that persists gets the redacted one. The rule I use on client agents: **redaction belongs at the boundary where data leaves the call**, not at the recogniser, unless the call itself never needs the value.
+
+## Try it
+
+Sign in to use the short daily allowance across the playground demos. The prescription on screen is made up for each call, and nothing is filled.
+
+<PlaygroundDemo demo="pharmacy" />
+
+Things worth trying, because they are where refill lines break:
+
+- Say the sound-alike drug. The read-back passes, and `confirm` reports a mismatch without saying what is on file.
+- Read the Rx number with the wrong last letter, then correct it. Watch the match score change.
+- Give a postal code starting with D. The tool rejects it before the agent repeats it.
+- Say your date of birth and a phone number in one breath. The call log masks both.
+- Ask it to place the refill after two fields. It lists what is still unconfirmed.
+
+## What this means for you
+
+1. **Give every captured value a state.** Heard, confirmed and mismatched are different things, and only confirmed should reach a system of record.
+2. **Keep the record out of the model's context.** Let tools compare against it and answer "match" or "no match", so the agent cannot be talked into reading it out.
+3. **Fix pronunciation and privacy at the pipeline nodes.** Spell codes in the TTS node, redact at the logging boundary, and keep the prompt for conversation.
+
+The [pharmacy refill source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/pharmacy-refill) runs with `uv sync` and `uv run python agent.py console` once you add Deepgram, OpenAI, Cartesia and LiveKit keys, and its unit tests need no keys at all.
+
+If your agent takes identifiers over the phone (member IDs, policy numbers, prescriptions), capture, confirmation and redaction are among the first things we check in a [production readiness review](/contact).
