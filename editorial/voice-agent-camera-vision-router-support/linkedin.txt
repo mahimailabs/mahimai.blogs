@@ -1,0 +1,19 @@
+"The internet light? It's kind of orange. Is it flashing? I think it's flashing."
+
+Every ISP support line hears that a few thousand times a day. Asking the caller to point their phone at the router fixes it in one second. Streaming that camera into the model all call long is how you turn it into a cost problem.
+
+What we built instead:
+→ looking is a tool the model calls, with a reason it has to state ("confirm the power cycle worked")
+→ the camera is read only during a look: three frames, 0.35 s apart
+→ the three frames go to the vision model as one side-by-side image
+→ the vision model returns light states in a fixed vocabulary, and a Python table picks the fix
+
+The part I would reuse everywhere: one frame cannot see a blink. A status light between flashes looks off in a photo, and the agent sends the caller to check a cable that is fine. If the state you care about changes over time, put time inside the image.
+
+Two looks send six frames. A two-minute call produces 1,800 on camera.
+
+The router rescue demo is live in our playground. Use your camera or our drawn router, break it, and watch every frame the agent chose to look at.
+
+What does your vision agent look at that it never needed to?
+
+https://mahimai.ca/blog/voice-agent-camera-vision-router-support
