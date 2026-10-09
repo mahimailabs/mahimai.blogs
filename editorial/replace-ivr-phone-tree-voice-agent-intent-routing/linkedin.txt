@@ -1,0 +1,17 @@
+"For billing and payments, press 1." You wanted billing. You still have to hear that the menu options have changed.
+
+Replacing a phone tree with "tell me what you need" is easy on clear calls. The hard ones sound like this: "My internet is down and the technician never showed up." Two departments. An agent that guesses confidently sends half those callers to the wrong queue.
+
+How we built the router:
+→ every caller turn scores all six queues, plus "unclear"
+→ code decides, not the model: route at 75%, otherwise ask one question, never more than two
+→ the transfer tool has no department argument, so the model cannot pick the queue
+→ every transfer carries a one-line summary, so the caller never repeats themselves
+
+The surprise: one-token logprobs, the textbook way to get confidence, said 100% internet for that two-department sentence. A threshold over numbers that are always 0 or 100 never fires. Split scores from a strict JSON schema said 50/50, and the agent asked.
+
+We put it in our playground, racing a press-1 menu with a perfect caller. Say what you need and watch both clocks.
+
+Have you checked whether your classifier's confidence ever actually moves?
+
+https://mahimai.ca/blog/replace-ivr-phone-tree-voice-agent-intent-routing
