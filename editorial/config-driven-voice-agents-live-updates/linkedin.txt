@@ -1,0 +1,19 @@
+Ten customers. Ten agent classes. Ten deploys every time someone wants to change a sentence.
+
+That is how most in-house voice platforms grow. The fix is boring: the agent is data.
+
+What we built for the playground:
+→ one config per tenant: brief, voice, tools, guardrails
+→ tools picked by name from a library you own, never shipped by the tenant
+→ the config rides in the LiveKit dispatch, validated on the site and again in the worker
+→ platform rules composed after the tenant brief, so no brief can switch them off
+
+The part that surprised people: changing the agent mid-call. The browser sends a new versioned config over LiveKit RPC. The agent runs update_instructions and update_tools, swaps the Cartesia voice, and says "Updated" in the new voice. The call never drops.
+
+Version every config as a full snapshot and reject anything older than what is running. A retried request can never roll your agent back.
+
+You can build an agent in our playground and change it while you talk to it.
+
+How does your team change a live agent today: a deploy, or a config?
+
+https://mahimai.ca/blog/config-driven-voice-agents-live-updates

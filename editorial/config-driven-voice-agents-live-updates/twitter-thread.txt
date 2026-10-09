@@ -1,0 +1,13 @@
+1/ If you are building your own voice agent platform, stop writing an agent class per customer. Make the agent a function of config, and let that config change mid-call without dropping it. Here is how we did it on LiveKit.
+
+2/ The tenant surface is six fields: version, business, brief, voice, tools, guardrails. Tools and guardrails are names picked from libraries the platform owns. A tenant can switch a tool off. It can never ship one.
+
+3/ The config rides in the agent dispatch inside the LiveKit token. No second fetch, no race. The site validates it before reserving the call, and the worker validates it again before using it.
+
+4/ Instructions are composed in layers: the tenant brief, quoted and labelled. Then tenant guardrails. Then platform rules last, which no config field can remove. The live tool list is restated on every compose.
+
+5/ Mid-call: the browser sends the full new config over LiveKit RPC. The agent runs update_instructions and update_tools, swaps the Cartesia voice, and says "Updated" in the new voice. Same call, same history.
+
+6/ What makes it safe: full snapshots with monotonic versions, a lock around the swap, only the call's own participant may call the method, and a cap of eight updates per call.
+
+7/ Build an agent and change it while you talk to it: https://mahimai.ca/blog/config-driven-voice-agents-live-updates
