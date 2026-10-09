@@ -1,0 +1,18 @@
+"Two hundred and fifteen dollars. My plan is sixty-five. This is ridiculous."
+
+Most voice agents answer that with "I understand your frustration, per our policy..." and lose the customer. The usual fix is a prompt line: be empathetic, transfer if needed. The model forgets how angry the caller was two turns ago, repeats the same empathy, and transfers on a whim.
+
+What we built instead:
+→ a frustration meter beside the LLM, scoring every turn from words and timing
+→ talking over the agent, fast speech and repetition count, not just angry words
+→ the score picks one move per reply: reflect back, name the feeling, offer a choice, take ownership
+→ Cartesia sonic-3 slows down and softens as the call heats up
+→ the handoff is a rule in code: 85, three hot turns, or two asks for a person
+
+The part that makes finance teams comfortable: the $75 credit limit is enforced by the tool, not the prompt. A prompt is a request. A tool that refuses is a control.
+
+Play the angry customer in our playground and watch your own frustration curve.
+
+How does your agent decide when to give up and hand off?
+
+https://mahimai.ca/blog/voice-agent-frustration-deescalation-handoff
