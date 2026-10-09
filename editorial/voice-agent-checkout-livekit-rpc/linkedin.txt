@@ -1,0 +1,20 @@
+"Ship it to Vancouver, B.C., M5V 2T6."
+
+That postal code is in Toronto. A checkout page catches it. Most voice agents don't, because the rules live in the web app and the agent lives in a separate bot.
+
+The usual fix is to copy the rules into the agent. Now you have two checkouts, and they drift the first time someone changes shipping policy.
+
+What we built instead:
+→ every tool call is a LiveKit RPC to the shopper's page
+→ the page validates with the same function the keyboard uses
+→ a rejection comes back as the tool result, so the agent says what the page said
+→ the order only goes through if the model sends back the exact total the page computed
+→ typed edits go the other way, so the agent never asks twice
+
+The agent owns zero business rules. It is a new input device for the product.
+
+Try it in our playground: give it a postal code from the wrong province and watch the RPC log.
+
+Where does your agent keep a second copy of rules your product already enforces?
+
+https://mahimai.ca/blog/voice-agent-checkout-livekit-rpc

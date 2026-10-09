@@ -1,0 +1,246 @@
+---
+title: 'Voice Checkout: Let the Agent Drive the Page Over RPC'
+description: 'Build a voice checkout with LiveKit RPC: the agent fills the real form, the page validates and prices it, and rejections come back as tool results.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'rpc', 'ecommerce', 'function-calling']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** Put voice inside the product, not in a chat bubble beside it. Forward the agent's tool calls to the page over LiveKit RPC, and let the page that already validates and prices the form give the verdict. A rejection comes back to the model as the tool result, so the agent says what the page said. Typed edits go the other way. Below is a live checkout you can fill by voice, and the code that drives it.
+
+"Ship it to 120 King Street West, Vancouver, B.C., M5V 2T6."
+
+That postal code is in Toronto. A human at a checkout counter would catch it. Most voice agents would not, because they never see the rules: the address form, its validation and the tax table live in the web app, and the agent lives in a separate bot that only talks.
+
+The usual fix is to copy the rules into the agent. Now you have two checkouts, one for the keyboard and one for the voice, and they drift the first time someone changes the shipping policy. This post walks through the [voice checkout demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/voice-checkout) in awesome-voice-apps, where the agent has no rules of its own. It drives the page.
+
+## Two checkouts is one too many
+
+Enterprise teams that add voice to an existing product hit the same wall. The product already has:
+
+- a form with field-level validation,
+- a pricing engine that knows tax, shipping and promotions,
+- a final "place order" step with its own checks.
+
+An agent that rebuilds any of that becomes a second implementation. It quotes a total the cart page does not show. It accepts a ZIP the payment processor rejects. And it cannot see what the shopper typed into the page three seconds ago.
+
+So the rule I use: **the model converses and extracts, the page validates and computes, and RPC is the only wire between them.** The agent is a new input device for the product, not a parallel product.
+
+## Tool calls become RPC calls
+
+LiveKit RPC lets one participant call a method registered by another participant in the same room and await a string reply. The agent and the shopper's browser are already in the room for the audio, so the wire is free.
+
+On the agent side, every tool does the same thing: serialize the arguments, call the page, return what the page said.
+
+```python
+async def call_page(self, method: str, payload: dict) -> dict:
+    """Forward one tool call to the page and return its JSON reply."""
+    try:
+        reply = await self.room.local_participant.perform_rpc(
+            destination_identity=self._shopper(),
+            method=method,
+            payload=json.dumps(payload),
+            response_timeout=RPC_TIMEOUT,  # 4 seconds
+        )
+    except rtc.RpcError as error:
+        if error.code in (INVALID_FIELDS, NOT_READY):
+            # The page's own words go back to the model.
+            raise ToolError(f"The page rejected it: {error.message}.") from None
+        raise ToolError(
+            "The checkout page did not answer. Apologise and ask the shopper "
+            "to check the page is still open."
+        ) from None
+    return json.loads(reply)
+```
+
+`fill_checkout` takes every field as an optional argument, so one answer like "a medium jacket in moss, just one" becomes one tool call with four fields, not four round trips:
+
+```python
+@function_tool()
+async def fill_checkout(
+    self,
+    context: RunContext,
+    item: str | None = None,
+    size: str | None = None,
+    colour: str | None = None,
+    quantity: int | None = None,
+    # ... full_name, street, city, region, postal_code, country, shipping
+) -> str:
+    """Fill one or more checkout fields on the shopper's page."""
+    fields = _clean({"item": item, "size": size, "colour": colour, "quantity": quantity})
+    return summarize(await self.call_page("checkout.set_fields", {"fields": fields}))
+```
+
+On the page, the method is registered on the room before it connects, so it is ready when the agent joins:
+
+```ts
+room.registerRpcMethod('checkout.set_fields', async (data) => {
+  const caller = room.remoteParticipants.get(data.callerIdentity);
+  if (caller?.kind !== ParticipantKind.AGENT) throw new RpcError(2002, 'Not accepted');
+  const { fields } = JSON.parse(data.payload);
+  const result = applyFields(form, fields); // the same function the keyboard uses
+  setForm(result.form);
+  if (Object.keys(result.errors).length)
+    throw new RpcError(2001, spoken(result.errors), JSON.stringify(snapshot(result.form)));
+  return JSON.stringify(snapshot(result.form));
+});
+```
+
+`applyFields` is the page's existing validation. It does not know or care whether the value came from a keyboard or a voice agent.
+
+## The page has the last word
+
+Here is what the page checks that the agent never sees:
+
+| Rule | What the shopper hears |
+| --- | --- |
+| Canadian postal code format | "That isn't a valid Canadian postal code, like M5V 2T6." |
+| First letter of the postal code matches the province | "M5V is a postal code in Ontario, not British Columbia." |
+| Size and colour exist for this item | "The Trail daypack 24L comes in slate, sand." |
+| Quantity limit | "Ridgeline limits each order to 5 of an item." |
+| Express shipping reach | "Express does not ship to Nunavut; standard does." |
+| Street needs a house number | "The street address needs a house number." |
+
+Valid fields land even when others in the same call fail, and the error carries the form's state as `data`. The model hears what was kept and what was rejected, and asks for only the bad field.
+
+Two error codes are enough. LiveKit reserves 1001 to 1999 for its own errors (timeouts, recipient not found, payload too large), so the page uses 2001 for "invalid fields" and 2002 for "not ready". The agent turns those two into a `ToolError` with the page's message, which LiveKit hands to the model as the tool result. Anything else, a timeout or a closed tab, becomes a generic "the page did not answer" so the model apologises instead of inventing a confirmation.
+
+Keep the message short. RPC error messages are capped at a few hundred bytes, and the model is going to say it out loud anyway.
+
+## The model never states a price
+
+The most expensive bug in a voice checkout is a total the model made up. Large language models are bad at tax arithmetic and confident about it.
+
+The page computes the total and returns it in every reply. The agent's instructions say to read it back exactly. Then `place_order` has to send that total back:
+
+```python
+@function_tool()
+async def place_order(self, context: RunContext, total: str) -> str:
+    """Place the order after the shopper confirmed the read-back.
+
+    total: the total exactly as review_checkout reported it.
+    """
+    result = await self.call_page("checkout.place_order", {"total": total})
+    return f"Order placed. Order number {result.get('order', 'unknown')}."
+```
+
+The page refuses the order unless every field is filled and the total matches its own to the cent:
+
+```ts
+export function orderProblem(form: CheckoutForm, total: unknown): string | null {
+  const gaps = missing(form);
+  if (gaps.length) return `still missing ${gaps.join(', ')}`;
+  const expected = money(quote(form)!.total);
+  const said = typeof total === 'string' ? total.replace(/[^\d.]/g, '') : '';
+  if (Number(said).toFixed(2) !== expected.slice(1))
+    return `the total is ${expected}; read that back to the shopper before ordering`;
+  return null;
+}
+```
+
+If the model skipped the read-back or paraphrased the number, the order fails with a sentence telling it what to do. This is the voice version of the confirmation screen, enforced by the screen.
+
+## Typing still works, and the agent notices
+
+Voice in the product means the keyboard does not stop working. If the shopper clicks the city field and types "Vancouver", the page validates it with the same function and then calls the agent:
+
+```ts
+await room.localParticipant.performRpc({
+  destinationIdentity: agent.identity,
+  method: 'checkout.page_edited',
+  payload: JSON.stringify({ field, value }),
+  responseTimeout: 4000,
+});
+```
+
+The agent adds it to the conversation as something the shopper said, so it does not ask for the city again:
+
+```python
+async def _page_edited(self, data: rtc.RpcInvocationData) -> str:
+    if data.caller_identity != self._shopper() or self._page_edits >= MAX_PAGE_EDITS:
+        raise rtc.RpcError(NOT_READY, "Not accepted")
+    edit = json.loads(data.payload)
+    field, value = edit["field"], str(edit["value"]).strip()[:80]
+    if field not in FIELDS:
+        raise rtc.RpcError(INVALID_FIELDS, "Unknown field")
+    self._page_edits += 1
+    chat_ctx = self.chat_ctx.copy()
+    chat_ctx.add_message(role="user", content=f"On the page: I set {field} to {value!r}.")
+    await self.update_chat_ctx(chat_ctx)
+    return "ok"
+```
+
+Three guards matter here. Only the shopper's identity can call it. Only known field names get in, clipped to 80 characters. And there is a cap on edits per call, because every one of them grows the context the next LLM request pays for. It goes in as a `user` message, never a `system` one: it is the shopper's input, with the same trust as their voice.
+
+## Try it
+
+Sign in to use the short daily allowance across the playground demos. Ridgeline Outfitters is made up, nothing is charged or shipped, and the payment is a demo card already on the page. Use a made-up name and address.
+
+<PlaygroundDemo demo="checkout" />
+
+Things worth trying, because they are where voice checkouts break:
+
+- Say "Vancouver, British Columbia, M5V 2T6". The page rejects the postal code, keeps the city and province, and the agent asks again.
+- Ask for the daypack in moss. The page says it comes in slate and sand.
+- Click the city field and type a different city. Watch the receipt under the call print the page calling the agent, and listen for it not asking.
+- Ask for express shipping to Nunavut.
+- Say "just place it" before the read-back. The page refuses the order until the agent reads back its total.
+
+The receipt under the call prints every RPC in both directions, with the page's verdict and its timing. Values the agent fills type themselves into the form; values the page rejects are struck through before they clear.
+
+## Permissions and the data channel
+
+RPC requests and replies ride the room's data channel. The playground's visitor token was microphone only, with `canPublishData: false`, so the browser could not answer. The checkout demo is the one demo whose token allows data publish, and only for it:
+
+```ts
+token.addGrant({
+  roomJoin: true,
+  room: roomName(call.id),
+  canPublish: true,
+  canPublishSources: [TrackSource.MICROPHONE],
+  // RPC replies travel on the data channel; only demos whose page answers RPC get it.
+  canPublishData: pageRpc(call.demo ?? 'coffee'),
+  canSubscribe: true,
+});
+```
+
+Opening the data channel opens another door, so close the one you did not mean to open. LiveKit Agents accepts typed chat on the `lk.chat` text stream by default, which would let a visitor skip speech-to-text and feed text straight to the model. The hosted worker turns that off:
+
+```python
+await session.start(
+    agent=agent, room=ctx.room, record=False, room_options=RoomOptions(text_input=False)
+)
+```
+
+If your product does want typed chat next to voice, keep it, but rate-limit it like any other input that costs you an LLM call.
+
+## Testing it
+
+Both halves are testable without a call. The page's rules are pure TypeScript functions:
+
+```ts
+it('rejects a postal code from another province and keeps the rest', () => {
+  const { form, errors } = applyFields(emptyForm(), {
+    city: 'Vancouver',
+    region: 'British Columbia',
+    postal_code: 'M5V 2T6',
+  });
+  expect(errors.postal_code).toBe('M5V is a postal code in Ontario, not British Columbia');
+  expect(form.city).toBe('Vancouver');
+});
+```
+
+The agent side mocks `perform_rpc` and checks that a page rejection becomes a `ToolError` with the page's words, that a timeout becomes "did not answer", and that `page_edited` ignores unknown fields and other callers. No provider keys, no room.
+
+## What this means for you
+
+1. **Do not give the agent its own copy of the business rules.** Forward tool calls to the surface that already enforces them, over RPC when that surface is a web page, and let its errors become tool results.
+2. **Make the irreversible step check the model's work.** Require the total, the slot id or the amount the system computed, and refuse when the model's number does not match.
+3. **Treat the data channel as an input.** Grant data publish only where a page answers RPC, accept calls only from the identities you expect, and turn off the text input you are not using.
+
+The [voice checkout source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/voice-checkout) runs with `uv sync` and `uv run python agent.py dev` once you add LiveKit, OpenAI, Deepgram and Cartesia keys; its README has the full RPC contract for your own page. The [LiveKit RPC documentation](https://docs.livekit.io/transport/data/rpc/) covers method names, payload limits, timeouts and the built-in error codes, and the [tool forwarding section](https://docs.livekit.io/agents/logic/tools/forwarding/) covers the pattern on the agent side.
+
+If you are adding voice to a product that already has a checkout, a booking flow or an account page, this is the integration shape we design in a [prototype to production engagement](/contact).
