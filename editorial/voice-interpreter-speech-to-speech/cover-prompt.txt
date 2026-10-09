@@ -1,0 +1,5 @@
+Blog cover, 16:9, 1600x900. The playground card (public/images/playground/front-desk-interpreter.webp in mahimai.ca) is currently rendered from the demo's black-stage diagram; replace it with a 3:2 crop of this cover if it matches the other cards.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light and leaf shadows, pale marble hotel reception counter, muted lavender accents.
+
+Subject: a small brass service bell, a room key card in a paper sleeve, a folded map, two speech bubble shaped paper cards (blank, no text) facing each other, and a matte black desk microphone with a thin lavender ring between them. No people, no readable text, no logos, no flags.

@@ -1,0 +1,17 @@
+"¿A qué hora es el desayuno?"
+
+A good interpreter says "What time is breakfast?"
+A typical voice assistant says "Breakfast is from seven to ten."
+
+Fluent. Friendly. Wrong. The guest asked the desk, not the interpreter.
+
+What it takes to build a live interpreter agent:
+
+→ Speech to speech: one model hears any language and speaks any language. No language detection step in the middle.
+→ Instructions that forbid helping, clause by clause: first person, questions stay questions, never summarize.
+→ Captions paired on turns, not finals. A ten-second sentence is several "final" segments.
+→ Two people, one session: relink to the active speaker, never while the agent is talking (echo).
+
+Play the guest and the desk yourself: https://mahimai.ca/blog/voice-interpreter-speech-to-speech
+
+What is the hardest thing to stop your agent from doing?
