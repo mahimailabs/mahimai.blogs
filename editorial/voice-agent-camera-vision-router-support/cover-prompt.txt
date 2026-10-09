@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/router-rescue.webp in mahimai.ca, which currently holds a flat vector placeholder in the style of claim-intake.webp.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light and leaf shadows, pale wood shelf, a sprig of lavender in a small ceramic pot, muted lavender accents.
+
+Subject: a matte black home internet router with two antennas and four small front status lights, three glowing soft green and one glowing amber with a gentle halo, a smartphone held at an angle in front of it showing faint camera framing corners on its screen, and a matte black desk microphone with a thin lavender ring, like the coffee counter card.
+
+Composition: objects arranged left to right along the shelf, generous empty wall above for overlay, eye-level, shallow depth of field. Evening light from the upper left. Calm, problem-about-to-be-solved mood. No people, no readable text, no logos, no ISP brand marks, no UI.

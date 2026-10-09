@@ -1,0 +1,12 @@
+1/ A support agent that can see your router is easy to build. One that does not pay for 1,800 frames to read four lights takes a few decisions. Here is the router rescue voice agent, and the pattern behind it.
+
+2/ Default LiveKit video input samples one frame a second while the user speaks. Right for open-ended assistants. Wrong for support: the router matters for maybe three moments in a call.
+
+3/ So looking is a tool. look_at_camera(reason, focus). The model must say why before it looks, and that reason is shown next to the frames. Repeat looks within 3 s are reused, and a call is capped at six.
+
+4/ One frame cannot see a blink. Between flashes, a blinking amber light photographs as off. So each look grabs three frames 0.35 s apart and sends them as one side-by-side strip. One image request, timing included.
+
+5/ The vision model only reports light states from a fixed list, with not_visible allowed. A plain Python function maps them to the fix. The model reads, the table decides, and every branch has a unit test.
+
+6/ Two looks send six frames. A two-minute call at 15 fps produces 1,800. Try it with your camera or our drawn router, and see every frame it chose to look at:
+https://mahimai.ca/blog/voice-agent-camera-vision-router-support
