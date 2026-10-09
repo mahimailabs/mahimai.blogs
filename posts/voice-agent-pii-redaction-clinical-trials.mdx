@@ -44,12 +44,18 @@ So the demo redacts one layer earlier, in `stt_node`, where speech-to-text event
 ```python
 def screen(self, event: stt.SpeechEvent) -> stt.SpeechEvent:
     """Redact the transcript before the session, the model or the history see it."""
-    for alt in event.alternatives:
-        alt.text, found = redact(alt.text)
-        if found and event.type == stt.SpeechEventType.FINAL_TRANSCRIPT:
+    final = event.type == stt.SpeechEventType.FINAL_TRANSCRIPT
+    state = self._state
+    hold = state is not None and not state["participant"]
+    carry = self._carry
+    for i, alt in enumerate(event.alternatives):
+        alt.text, found, rest = screen_text(alt.text, carry, hold)
+        if not final or i:
+            continue
+        self._carry = rest
+        if found:
             self.ledger.redacted += len(found)
-            state = self._state
-            if state is not None and not state["participant"]:
+            if hold:
                 state["participant"] = found[0]
                 self.ledger.secret = found[0]
             self.schedule_publish()
@@ -67,7 +73,7 @@ async def stt_node(self, audio, model_settings):
 
 Every interim, preflight and final transcript passes through `screen`. Preemptive requests, the chat history, the transcript shown in the room, and the turn the model finally answers all see the redacted text. Only the final transcript records the number, so a half-heard interim never becomes the participant ID.
 
-`redact` handles how speech to text actually writes a spoken number: "4127", "4 1 2 7" or "four one two seven". It joins runs of digits and digit words. Any run of three to eight digits becomes `[participant number]`. Single numbers like "two doses" are left alone, so the diary answers still reach the model. It over-redacts on purpose: "since 2026" also becomes the placeholder, which costs the model nothing.
+`screen_text` handles how speech to text actually writes a spoken number: "4127", "4 1 2 7" or "four one two seven". It joins runs of digits and digit words. Any run of three to eight digits becomes `[participant number]`. Single numbers like "two doses" are left alone, so the diary answers still reach the model. It over-redacts on purpose: "since 2026" also becomes the placeholder, which costs the model nothing. A caller can also pause mid-number, and speech to text then sends "four one" and "two seven" as two final transcripts. Until the number is recorded, `screen_text` holds back a short run of digits at the end of a transcript (it's redacted too) and joins it to a run at the start of the next one, so no fragment reaches the model.
 
 The model's instructions say what the placeholder means: the number is already recorded, so thank them and move on. The completion tool checks the worker's copy, not the model's word, and asks the model to have them repeat it if nothing was captured.
 
