@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also used (cropped to 3:2, 1200x800) as the playground card at public/images/playground/furnace-repair.webp in mahimai.ca, which currently holds a flat placeholder.
+
+Match the existing playground cards (coffee-counter.webp, claim-intake.webp): soft painterly illustration, warm cream plaster wall, pale wood floor, muted lavender accents.
+
+Subject: a compact residential furnace with a dark, unlit burner window, a frosted window beside it with snow outside and a wall thermometer reading very cold, a smartphone leaning on the floor showing an audio waveform with two small gaps, and a matte black desk microphone with a thin lavender ring, like the coffee counter card. A mug with faint steam suggests someone waiting in the cold.
+
+Composition: objects along the floor line, generous empty wall above for overlay, eye-level, shallow depth of field. Cold blue light from the window, warm lamp light from the left. Calm, slightly urgent mood. No people, no readable text, no logos, no brand marks, no UI.
