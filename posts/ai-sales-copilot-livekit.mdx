@@ -1,0 +1,152 @@
+---
+title: 'Build a Real-Time AI Sales Copilot with LiveKit'
+description: 'A silent second agent hears both sides of a sales call and puts the battle card on screen in about 200 ms. How it works, with a demo you can sell in.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'sales-copilot', 'retrieval', 'multi-agent']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** A live sales copilot is a second agent on the call that never speaks. It hears both sides, matches what the buyer just said against a playbook, and writes to the rep's screen. Split its work in two: retrieval puts the right card up in about 200 ms, and a small model turns that card into one sentence the rep can say about a second later. Never make the card wait for the model. Below, you can take a discovery call with a skeptical AI buyer and watch both land.
+
+The hardest moment on a discovery call is the half second after the buyer says "we're already talking to your competitor." The rep knows there is a battle card for this. It is in a Notion page, three clicks away, and the buyer is waiting.
+
+Revenue teams buy conversation intelligence to fix the week after the call: summaries, scorecards, CRM notes. The copilot in this post is about the second after the objection. That is a different system. It has a latency budget, it runs while two people are talking, and it is not allowed to say a word.
+
+The demo below makes you the rep. You are selling Ledgerline, accounts payable software you have never heard of, to Dana Okafor, VP Finance at Kestrel Freight. Both are made up. Dana is an AI prospect who pushes back on price, security, NetSuite and a competitor called Quillpay. Your copilot hears her, and you get the answer before you need it.
+
+## Two agents, one call
+
+There are two agents on this call, and they do very different jobs.
+
+| | The prospect | The copilot |
+| --- | --- | --- |
+| Speaks | Yes, through STT, LLM and TTS | Never |
+| Hears | The rep | Both sides |
+| Output | Audio into the room | Data to the rep's screen |
+| Latency it cares about | Time to first audio | Time from "buyer stopped" to card on screen |
+| If it fails | The call breaks | The rep is on their own, the call goes on |
+
+That last row is the design rule. The copilot is advisory. Every failure in it (a slow model, a retrieval miss, an API outage) has to degrade to "no cue", never to a broken call. So it gets its own client, its own limits, and its own error handling, and it never touches the speaking agent's pipeline.
+
+In production the copilot is usually its own participant: a hidden agent in the room, often a separate job, so it can be scaled and deployed apart from whatever is speaking. In a human-to-human sales call there is no speaking agent at all, and the copilot runs STT on both tracks.
+
+You often do not need a second STT, though. LiveKit Agents already publishes transcriptions of both sides to the room as text streams on the `lk.transcription` topic. A copilot participant can subscribe to that topic and read the call as text. One transcription, many consumers.
+
+In our playground every call is one visitor and one agent, so the demo runs the copilot in the same job as the prospect and feeds it from session events instead. The shape is the same: transcripts in, cues out, no audio.
+
+```python
+def watch(session: AgentSession, copilot: Copilot) -> None:
+    """Feed both sides of the conversation to the copilot."""
+
+    def on_transcript(event) -> None:
+        if event.is_final:
+            copilot.heard_rep(event.transcript)
+
+    def on_item(event) -> None:
+        item = event.item
+        # The prospect's reply is committed when she stops talking (or is cut off).
+        if getattr(item, "role", None) == "assistant" and item.text_content:
+            copilot.heard_prospect(item.text_content)
+
+    session.on("user_input_transcribed", on_transcript)
+    session.on("conversation_item_added", on_item)
+```
+
+`conversation_item_added` fires when text is committed to the chat history. For the agent's own speech, that is when playout ends. So the copilot's clock starts at the same moment a human rep starts reaching for an answer: when the buyer stops talking.
+
+## Retrieval first, generation second
+
+The naive copilot sends the transcript to an LLM and asks "what should the rep say?" It works in a notebook. On a call it puts nothing on screen for a second or two, and then a paragraph.
+
+Split the job. Retrieval is fast and deterministic: embed the buyer's line and find the closest playbook card. Generation is slow and flexible: rewrite the card for this exact moment. Publish the card the instant you have it, then update it when the line arrives.
+
+```python
+async def _cue(self, cue: Cue, text: str, start: float) -> None:
+    try:
+        await self._retrieve(cue, text, start)  # card on screen, ~200 ms
+        cue.ask = self.next_question(cue.card)
+        self.emit()
+        await self._write(cue, start)  # tailored line, ~1 s
+    except Exception:
+        logger.warning("Copilot cue failed", exc_info=True)
+    finally:
+        cue.ask = self.next_question(cue.card)
+        cue.done = True
+        self.emit()
+```
+
+`emit()` sends the whole panel state as one `ui_event` data packet. Sending a full snapshot instead of diffs means a lost or reordered packet never leaves the screen in a state the server never had.
+
+The playbook is twelve cards: objection handlers (price, timing, status quo, NetSuite and IT, security, adoption, the brush-off), two competitor battle cards, and buying signals (duplicate payments, a slow close, the buying group). Each card carries a handful of trigger phrases. We embed every phrase once per worker with `text-embedding-3-small` and score a card by its closest phrase:
+
+```python
+def best_card(index: dict, vector: list[float]) -> tuple[Card | None, float]:
+    query = np.asarray(vector, dtype=np.float32)
+    query /= np.linalg.norm(query) or 1.0
+    scores = index["vectors"] @ query
+    best: dict[str, float] = {}
+    for card_id, score in zip(index["ids"], scores.tolist()):
+        best[card_id] = max(score, best.get(card_id, -1.0))
+    card_id, score = max(best.items(), key=lambda item: item[1])
+    return (CARDS[card_id] if score >= FLOOR else None), round(float(score), 3)
+```
+
+Max over phrases beats one embedding per card. A card's description averages its meanings together. "What does this cost" and "I can't justify that spend to my CFO" are both price objections and do not sound alike.
+
+### Pick the floor from data, not taste
+
+A copilot that throws a card at every "sure, go ahead" trains the rep to ignore it. So the floor matters more than the model.
+
+The demo ships a small script, `measure_floor.py`, that scores lines a buyer might say against the playbook. On our run, 14 on-topic lines matched the right card with cosine scores from 0.48 to 0.85. Greetings and small talk ("Sure, go ahead", "We move freight across Ontario") scored 0.23 to 0.32. We set the floor at 0.42, in the gap. Rerun the script whenever the playbook changes. A new card with vague triggers is how false cues creep back in.
+
+When nothing clears the floor, the panel says so ("No playbook match") and still moves discovery forward. Saying "I have nothing" is a feature.
+
+## The line, and what the model is not allowed to do
+
+The second stage is one `gpt-4o-mini` call with a strict JSON schema. It gets the card, the last six lines of transcript and the buyer's latest line, and returns:
+
+- `say`: one sentence the rep can say out loud, at most 22 words,
+- six discovery notes (pain, impact, process, decision, timeline, budget), filled only with what the buyer actually said,
+- `next_step`: set only when the buyer just agreed to one.
+
+The prompt's most important lines are the negative ones: never invent a number, customer or feature the card does not give you, and use an empty string when the buyer has not said it. A copilot that makes up a customer reference is worse than none. The rep will repeat it, and the buyer will ask for the contact.
+
+Strict structured output also matters for latency. The model cannot ramble, and the parse never fails. On our run the line landed 0.95 to 2.1 s after the buyer stopped, with a median around 1.0 s. The card landed 166 to 257 ms after. These numbers come from a development machine calling OpenAI directly. The demo measures them on every call from the hosted worker and shows the medians on the panel, so trust the panel over this paragraph.
+
+The next question is deterministic, not generated. If the matched card has a question for a discovery item that is still open, ask that. Otherwise ask the first open item in order. Once everything is known, ask for the next step. Code is better than a model at "what haven't we covered yet", and it never repeats a question that was answered.
+
+## Try it
+
+You are the rep. Open with a discovery question, not a pitch. When Dana pushes back, read the card, say the line in your own words, then ask the question under it. Get her to agree to a technical demo with her controller before the two minutes run out.
+
+<PlaygroundDemo demo="copilot" />
+
+Things to watch:
+
+- **The hand.** The twelve playbook cards fan out on the black stage. When Dana stops talking, every card rises by its real similarity score, so you see the whole retrieval, not just the winner. The dashed arc is the 0.42 floor: the best card breaks through it and comes forward, and its edge lights when the tailored line lands. If nothing clears the arc, the copilot stays quiet.
+- **The landing strip.** Zero is when Dana stopped talking. The black mark is the card, the purple mark is the line. The card lands first every time, because it never waits for the model.
+- **"You talked."** Your share of the words on the call. Discovery calls go better when the buyer does most of the talking, and seeing the number live changes how you behave.
+- **The discovery grid.** It fills only from what Dana actually says. Ask good questions and it fills fast.
+
+## Costs and limits
+
+Copilots run on every utterance, so their cost scales with talk time, not with value. Three guardrails keep it bounded:
+
+1. **Per-call caps.** The hosted demo allows 14 lines and 24 lookups in a two-minute call, scaled down for shorter calls. Past the cap, retrieval-only cues keep working.
+2. **Metered on the call.** VoiceGateway meters the speaking agent's STT, LLM and TTS through the session. The copilot's embedding and chat calls bypass the session, so the worker prices each one from its token usage and adds it to the same call's ledger. Spend you do not attribute is spend you cannot cap.
+3. **Shared index, private state.** The playbook index is built once per worker and shared read-only. Every call gets its own copilot, transcript, discovery notes and OpenAI client.
+
+Per cue, the bill is one embedding of a short line plus one small chat completion of a few hundred tokens. That is a small fraction of what the speaking agent costs on the same call.
+
+## What this means for you
+
+1. **Separate the advisor from the speaker.** Whether it watches an AI agent or two humans, the copilot gets its own participant or job, its own limits and its own failure mode. A copilot outage should never be a call outage.
+2. **Ship the card before the sentence.** Put retrieval on screen as soon as it returns, and stream generation into the same slot. Measure both from the end of the buyer's speech, not from when your code happened to start.
+3. **Measure the floor on your own calls.** Pull a hundred real buyer lines, score them against your playbook, and set the threshold in the gap. Then watch how often reps act on a cue: that is the metric that decides whether the copilot stays.
+
+The code is in [awesome-voice-apps](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/sales-copilot): `copilot.py` has no LiveKit imports and runs on any transcript, and `agent.py` wires it into a session. It runs with `uv sync` and `uv run python agent.py console` once you add LiveKit, Deepgram, OpenAI and Cartesia keys. The [LiveKit text and transcriptions docs](https://docs.livekit.io/agents/multimodality/text/) cover the `lk.transcription` streams and the `conversation_item_added` event, and OpenAI's [structured outputs guide](https://platform.openai.com/docs/guides/structured-outputs) covers strict schemas.
+
+If you are building a copilot for your sales or support floor and want the latency budget checked before your reps see it, that is exactly what a [production readiness review](/contact) covers.

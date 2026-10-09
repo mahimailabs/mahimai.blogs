@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. Also usable (cropped to 3:2, 1200x800) as the playground card at public/images/playground/sales-copilot.webp in mahimai.ca, which currently holds a flat vector placeholder of the same scene.
+
+Match the existing playground cards (coffee-counter.webp, claim-intake.webp): soft painterly illustration, warm cream plaster wall, pale wood desk, muted lavender accents.
+
+Subject: a tidy sales desk. A laptop shows a video call with two blurred, faceless tiles and a small white card floating over the lower half of the screen with a lavender edge, as if a note just appeared. A matte black desk microphone with a thin lavender ring sits to the left, a black headset rests on a stand to the right, and a pale yellow sticky note on the wall has two lavender check marks and one empty box. A coffee cup with faint steam.
+
+Composition: objects along the desk line, generous empty wall above for overlay, eye-level, shallow depth of field. Warm daylight from the left. Focused, calm, slightly high-stakes mood. No people, no readable text, no logos, no brand marks.
