@@ -1,0 +1,206 @@
+---
+title: 'Resume a Dropped Voice Agent Call at the Exact Question'
+description: 'A LiveKit voice agent that checkpoints every answer, resumes a dropped call at the same question, and keeps prompts under a token budget with rolling summaries.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'state-management', 'context-engineering', 'financial-services']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** Treat a voice call as a session that can die at any moment, not as the unit of work. Save the application to a durable store after every answer, before the agent says "got it". When the caller rings back, load that checkpoint and start the new call with a few lines of state, not the old transcript. Use the same state message to replace older turns inside a call, and the prompt stays flat however long the form runs. You can drop a call on purpose below and watch it come back.
+
+"Sorry, I'm in a parking garage, you're breaking up. What was the..."
+
+Then nothing. The caller was six questions into a business loan application. When they ring back, most voice agents greet them like a stranger and ask for their name again. Some fraction of those callers do not ring back at all, and the ones who do are already annoyed.
+
+Long intake calls are where enterprise voice agents earn their keep: loan and lease applications, insurance quotes, benefits enrolment, patient onboarding. They are also the calls most likely to drop, because they are long and people take them from cars, warehouses and cell dead zones. This post walks through the [loan callback demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/loan-callback) in awesome-voice-apps, which makes a dropped call cost the caller nothing.
+
+## The call is not the unit of work
+
+The usual LiveKit agent keeps its state in `session.userdata`, which is exactly what the [docs recommend](https://docs.livekit.io/agents/logic/agents-handoffs/) for passing state between agents. It is the right place for state during a call. It is the wrong place for state that has to outlive one, because the session object dies with the room. A dropped line, a deploy that restarts the worker, a crash in a plugin: each one takes the application with it.
+
+So the demo splits the two:
+
+1. **The application** is plain data: answers, notes, a version number. It lives in a store keyed by the caller (an account id here, a phone number on a SIP trunk).
+2. **The call** is a disposable session that loads the application when it starts and writes it back after every change.
+
+The store is a three-method protocol, so the agent never knows whether it is talking to a file, Redis, Postgres or Cloudflare D1:
+
+```python
+class CheckpointStore(Protocol):
+    """Where the application lives between calls."""
+
+    name: str
+
+    async def load(self) -> dict | None: ...
+
+    async def save(self, state: dict, view: dict) -> None: ...
+```
+
+The standalone demo ships a `FileStore` that writes one JSON file per caller with an atomic rename. The hosted playground swaps in a store that posts to our site, which keeps the checkpoint in D1 against the signed-in account. Same agent, same tools.
+
+## Write through, before the agent moves on
+
+The order of operations is the whole pattern. The tool records the answer, saves the checkpoint, and only then returns. The agent cannot say "got it" about an answer that is not durable yet.
+
+```python
+@function_tool()
+async def record_answer(self, field: FieldName, value: str, note: str = "") -> str:
+    """Record the caller's answer to one application question.
+
+    Args:
+        field: The question being answered.
+        value: The answer. Years and money as plain numbers, like 4 or 250000.
+        note: One short sentence worth keeping for later, or empty.
+    """
+    result = application.record(self.state, field, value, note)
+    if result.startswith("rejected"):
+        self.publish()
+        return result
+    if not await self.checkpoint():
+        result += " The checkpoint did not save; carry on."
+    return result
+```
+
+`checkpoint` bumps a version number, times the save, and keeps going if the store is down. A failed save is reported to the model and to the panel, never raised, because a store outage should cost you a callback's worth of re-asking, not the live call.
+
+```python
+async def checkpoint(self) -> bool:
+    """Write the whole application to the store before the agent moves on."""
+    if not self.store:
+        return True
+    async with self._save_lock:
+        self.state["version"] += 1
+        started = time.perf_counter()
+        ok = True
+        try:
+            await self.store.save(copy.deepcopy(self.state), application.snapshot(self.state))
+        except Exception:  # noqa: BLE001 - the call goes on; the panel shows the miss
+            logger.warning("checkpoint save failed")
+            ok = False
+        self.saved = {
+            "version": self.state["version"],
+            "ms": round((time.perf_counter() - started) * 1000),
+            "ok": ok,
+        }
+    self.publish()
+    return ok
+```
+
+Two details matter in production:
+
+- **The version only goes up.** The store accepts a write only when its version is newer than the one it holds. A save that was retried, or arrived late from a call that already ended, can never roll an application back. In D1 that is one `ON CONFLICT ... WHERE excluded.version > playground_checkpoints.version`.
+- **The worker never names the caller.** It sends the reservation id of the current call, and the site looks up which account owns it. A bug or a prompt injection in the agent cannot load someone else's application, because the agent does not hold anything it could swap.
+
+The save sits inside the tool call, so its latency is on the conversational path. In the playground it is one HTTPS round trip from the worker to a Cloudflare Worker and D1; the panel prints the measured milliseconds next to each checkpoint so you can see what it costs on a real call. If your store is slow, save in the background and await it before the next tool call instead, but never let the agent confirm an answer whose save failed silently.
+
+## Resume at the question, not the call
+
+When a call starts, the agent loads the checkpoint before it says a word. The question to ask is not stored anywhere. It is derived: the first question without an answer.
+
+```python
+def current(state: dict) -> str | None:
+    """The question the caller is on: the first one without an answer."""
+    return next((field for field in FIELDS if field not in state["answers"]), None)
+```
+
+Deriving it means there is nothing to get out of sync. If the line dropped while the caller was halfway through saying their revenue, revenue has no answer, so revenue is the next question. If they answered three questions in one breath before the drop, all three are recorded and the agent skips past them.
+
+The opening instruction changes with the checkpoint:
+
+```python
+if self.resumed:
+    first = self.state["answers"].get("owner_name", "").split(" ")[0]
+    welcome = f"welcome {first} back" if first else "welcome them back"
+    return (
+        "The caller's line dropped during their last call and they called back. "
+        f"In one short sentence {welcome}, say every answer was kept, then ask "
+        f"only: {question}"
+    )
+```
+
+"Welcome back, Priya. I kept everything you told me. What was last year's revenue, roughly?" That one sentence is the product. The caller hears that the system remembered them before they have time to sigh.
+
+A finished application is not resumed. If the checkpoint says the last application was submitted, the next call opens a new one, and its version numbers keep counting from the old one so the store still refuses stale writes.
+
+## Carry state, not the transcript
+
+The tempting way to resume is to save the transcript and replay it into the new call's chat context. It works in a demo and fails in production for three reasons:
+
+1. **It grows.** A twenty-minute intake call is thousands of tokens of "uh", "sorry, say that again" and read-backs. Every request in the callback pays for all of it again.
+2. **It is ambiguous.** The transcript says "two fifty" and later "actually, make it three hundred". The model has to re-derive the current value every turn, and sometimes it picks the wrong one.
+3. **It is a liability.** A transcript is the most sensitive artifact a call produces. Storing a structured application is a smaller blast radius than storing every word.
+
+So the new call starts with this, and nothing else from the old one:
+
+```text
+Application NB-7F3A, call 2.
+Answered: Owner: Priya Shah; Business: Shah Bakery LLC; Years trading: 6.
+Notes: Wants the funds before the March wedding season.
+Next question (annual_revenue): What was last year's revenue, roughly?
+```
+
+That is around 60 tokens, built by `application.context_message` from the checkpoint. The panel in the demo prints it next to the size of the transcript it replaced.
+
+## The rolling summary rides on the tool call
+
+Structured answers lose something: the context around them. "I need it before March because that's wedding season" is not an answer to any question, but the underwriter wants it. A plain field list throws it away.
+
+The usual fix is a summarisation call. LiveKit's [handoff docs](https://docs.livekit.io/agents/logic/agents-handoffs/) show one: filter the chat context to user and assistant turns, then ask a separate LLM call for a summary. That works, but it is an extra request, extra latency and an extra bill per summary.
+
+The demo gets the same result for free. `record_answer` has a `note` argument, and the instructions tell the model to put anything worth keeping for later into it as one short sentence. The model already has the whole recent conversation in view when it calls the tool, so writing the note costs a few output tokens on a request it was making anyway.
+
+```python
+note = " ".join(str(note).split())[:MAX_NOTE]
+if note:
+    # The rolling summary: one line per thing worth keeping, oldest dropped first.
+    state["notes"] = [*state["notes"], note][-MAX_NOTES:]
+```
+
+The notes are capped at six lines of 160 characters, so the summary has a hard size limit. It lives in the checkpoint with the answers, which means it survives the drop too.
+
+## A prompt that stays flat
+
+The same state message solves a second problem: long calls. Inside one call, the agent overrides LiveKit's [`llm_node`](https://docs.livekit.io/agents/logic/nodes/) so every request is rebuilt from three parts: the instructions, the state message, and the last six conversation items.
+
+```python
+def llm_node(self, chat_ctx, tools, model_settings):
+    compact, dropped = self.compact(chat_ctx)
+    self._pending = [*self._pending[-3:], dropped]
+    return Agent.default.llm_node(self, compact, tools, model_settings)
+```
+
+`compact` keeps the first system message (the agent's instructions), inserts the state message, keeps the tail of the conversation, and keeps any system messages at the very end, because that is where `generate_reply(instructions=...)` puts per-turn instructions. Two guards matter:
+
+- **Never start the tail on a tool call or result** whose partner was cut off. Most providers reject a function output without its call.
+- **Enforce the budget.** If the estimate is still over `TOKEN_BUDGET`, drop two more items and try again, down to the last turn.
+
+Dropping old turns is only safe because nothing important lives only in them. Every answer is in the state message, every note is in the state message, and the next question is in the state message. The model loses the exact wording of four turns ago, which it did not need.
+
+To show the effect honestly, the panel uses real numbers. LiveKit's LLM plugin emits `metrics_collected` with `prompt_tokens` after each request ([the LLM metrics recipe](https://docs.livekit.io/reference/recipes/metrics_llm/) shows the hook), so the bar for what was sent is the provider's own count. The outline above it adds an estimate of what compaction left out, including earlier calls, at four characters per token. On a two-minute call the gap is modest. On the twenty-minute calls this pattern is built for, the full history keeps climbing while the sent bar stays under the budget line.
+
+## Try it
+
+Sign in to use the short daily allowance across the playground demos. Northbeam Capital is made up, and nothing is checked or saved beyond the demo's own 24-hour checkpoint.
+
+<PlaygroundDemo demo="resume" />
+
+Calls in this demo last 75 seconds on purpose, so seven questions do not fit in one. Things worth trying:
+
+- Answer three questions, then press **Drop the line** while you are mid-sentence. The panel shows what was saved and where the next call starts.
+- Call back. Listen for your name and the exact question, then compare the carried context with the transcript size it replaced.
+- Answer two questions in one breath ("Shah Bakery, six years"). Both are recorded and saved before the agent replies.
+- Mention something that is not an answer ("we need it before March"). It shows up in the rolling summary.
+- Change an earlier answer on the callback ("actually, make the amount three hundred thousand"). The checkpoint version goes up and the old value is gone.
+
+## What this means for you
+
+1. **Move durable state out of the session.** `session.userdata` is for the call. Anything a caller would be angry to repeat belongs in a store keyed by who they are, written before the agent acknowledges it.
+2. **Derive where to resume.** Store answers, not a cursor. The next question is a function of what is missing, so it can never point at the wrong place.
+3. **Send state, not history.** Rebuild each prompt from instructions, a compact state message and the last few turns. Let the model write the rolling summary inside a tool call it was already making.
+
+The [loan callback source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/loan-callback) runs with `uv sync` and `uv run python agent.py console` once you add Deepgram, OpenAI, Cartesia and LiveKit keys. Stop it mid-application with Ctrl+C and start it again to see the resume locally. Its unit tests need no keys.
+
+If your agents run long intake calls (applications, onboarding, claims), checkpointing and context size are two of the first things we look at in a [production readiness review](/contact).

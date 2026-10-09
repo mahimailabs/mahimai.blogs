@@ -1,0 +1,17 @@
+"Sorry, I'm in a parking garage, you're breaking up..."
+
+Six questions into a loan application. The line drops. When they call back, most voice agents ask for their name again.
+
+What we built instead:
+→ every answer is checkpointed to a durable store before the agent says "got it"
+→ the callback loads the checkpoint and resumes at the exact question, by name
+→ the new call starts with about 60 tokens of state, not the old transcript
+→ the model writes a rolling summary inside the tool call it was already making, so summarising costs no extra request
+
+The one I would copy first: store answers, not a cursor. The next question is simply the first one without an answer, so a resume can never point at the wrong place.
+
+We put it in our playground. Calls last 75 seconds on purpose, so the application never fits in one. Drop the line mid-sentence, call back, and watch it pick up.
+
+How many of your long intake calls end with a caller repeating themselves?
+
+https://mahimai.ca/blog/voice-agent-dropped-call-resume
