@@ -1,0 +1,13 @@
+1/ "It was 102. Actually, maybe 99. It's probably nothing." A nurse hears the 102. An LLM asked to judge often hears "probably nothing". Here is how we built a post-surgery check-in voice agent where the model never decides.
+
+2/ The model extracts, code decides. One typed tool per question: reading: float | None, drainage: Literal[...]. No escalate tool, no severity argument. Nothing the model can call takes a judgement.
+
+3/ The rules are a table with IDs. E1 chest pain: 911. N2 temperature at or above 101.5°F: nurse today. A clinician can sign it off, and tests check every threshold edge without a model.
+
+4/ The tool result is the script. On E1 it returns the exact 911 sentence and "ask nothing else". The next question always comes from the protocol order, not the model's sense of the conversation.
+
+5/ Emergency screens go first, like nurse triage protocols. A patient with chest pain should not answer four questions about their incision before hearing 911.
+
+6/ A correction never clears a fired rule. "102, actually 99" stays flagged, and the nurse's SBAR note shows both readings. Fail toward the callback.
+
+7/ Play the patient on a made-up day-3 knee replacement call, with the code: https://mahimai.ca/blog/voice-agent-post-op-check-in-escalation-rules

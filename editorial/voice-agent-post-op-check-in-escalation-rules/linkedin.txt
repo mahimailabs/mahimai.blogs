@@ -1,0 +1,20 @@
+"It was 102 this morning. Actually, maybe 99. It's probably nothing."
+
+A nurse hears the 102. A language model asked to judge often hears "probably nothing".
+
+That is the objection every clinical team raises about automated follow-up calls: who decides when the answer is a nurse or 911? If it is the model, the project ends there.
+
+So we built a post-op check-in agent where the model never decides:
+→ one typed tool per question, so the model only extracts facts: a temperature, a pain score, a drainage type
+→ a rule table in plain code sets the tier: routine, nurse today, or 911
+→ emergency questions come first, like nurse triage protocols
+→ a correction is recorded but never clears a rule that already fired
+→ the nurse gets an SBAR note built from the answers, not a model summary
+
+The one I would copy first: no tool takes a judgement as input. If your agent has an escalate tool or a severity argument, the model is deciding.
+
+Play the patient on a made-up day-3 knee replacement call and watch every rule fire.
+
+Where does your agent still let the model make the call?
+
+https://mahimai.ca/blog/voice-agent-post-op-check-in-escalation-rules
