@@ -179,7 +179,7 @@ def llm_node(self, chat_ctx, tools, model_settings):
 
 Dropping old turns is only safe because nothing important lives only in them. Every answer is in the state message, every note is in the state message, and the next question is in the state message. The model loses the exact wording of four turns ago, which it did not need.
 
-To show the effect honestly, the panel uses real numbers. LiveKit's LLM plugin emits `metrics_collected` with `prompt_tokens` after each request ([the LLM metrics recipe](https://docs.livekit.io/reference/recipes/metrics_llm/) shows the hook), so the bar for what was sent is the provider's own count. The outline above it adds an estimate of what compaction left out, including earlier calls, at four characters per token. On a two-minute call the gap is modest. On the twenty-minute calls this pattern is built for, the full history keeps climbing while the sent bar stays under the budget line.
+To show the effect honestly, the panel uses real numbers. LiveKit's LLM plugin emits `metrics_collected` with `prompt_tokens` after each request ([the LLM metrics recipe](https://docs.livekit.io/reference/recipes/metrics_llm/) shows the hook), so the bar for what was sent is the provider's own count. The outline above it adds an estimate of what compaction left out, including earlier calls, at four characters per token. On a 75-second demo call the gap is modest. On the twenty-minute calls this pattern is built for, the full history keeps climbing while the sent bar stays under the budget line.
 
 ## Try it
 
