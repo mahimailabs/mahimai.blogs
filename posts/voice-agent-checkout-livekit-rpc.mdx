@@ -185,11 +185,11 @@ Things worth trying, because they are where voice checkouts break:
 
 - Say "Vancouver, British Columbia, M5V 2T6". The page rejects the postal code, keeps the city and province, and the agent asks again.
 - Ask for the daypack in moss. The page says it comes in slate and sand.
-- Click the city field and type a different city. Watch the RPC log under the call show the page calling the agent, and listen for it not asking.
+- Click the city field and type a different city. Watch the receipt under the call print the page calling the agent, and listen for it not asking.
 - Ask for express shipping to Nunavut.
 - Say "just place it" before the read-back. The page refuses the order until the agent reads back its total.
 
-The log under the call is every RPC in both directions, with the page's verdict and its timing.
+The receipt under the call prints every RPC in both directions, with the page's verdict and its timing. Values the agent fills type themselves into the form; values the page rejects are struck through before they clear.
 
 ## Permissions and the data channel
 
