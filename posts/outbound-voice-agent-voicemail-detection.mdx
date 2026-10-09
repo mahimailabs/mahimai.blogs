@@ -17,7 +17,7 @@ import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
 
 That is the most common failure in outbound voice agents, and it is not a model problem. The agent was built like an inbound agent: it greets as soon as audio connects, so it talks over the greeting, asks a recording to press 1, and leaves a voicemail that starts mid-sentence. Delivery confirmations, appointment reminders and payment follow-ups are all outbound, and a large share of those calls reach a machine.
 
-This post walks through the [delivery window call](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/delivery-window-call) demo in awesome-voice-apps: about 470 lines of Python that place the call, classify who answered, and take a confirmation by key or by voice.
+This post walks through the [delivery window call](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/delivery-window-call) demo in awesome-voice-apps: about 420 lines of Python that wait for the callee, classify who answered, and take a confirmation by key or by voice. The demo runs in the browser, with you as the callee; the dialling step below is what a production deployment adds in front of it.
 
 ## Outbound is a different state machine
 
@@ -33,7 +33,7 @@ The rule that falls out of this: **an outbound agent does not greet first.** It 
 
 ## Dialling over SIP
 
-LiveKit places the call by adding a SIP participant to the agent's room. With `wait_until_answered=True`, the request returns when the callee picks up:
+In production, LiveKit places the call by adding a SIP participant to the agent's room, through an outbound trunk from a provider such as Twilio or Telnyx. With `wait_until_answered=True`, the request returns when the callee picks up:
 
 ```python
 from livekit import api
@@ -189,14 +189,12 @@ Things worth trying, because they are where outbound agents break:
 - Say "Thursday afternoon works better" instead of pressing anything.
 - Do nothing. After 25 seconds of ringing the call ends as no answer, like a real dialler.
 
-The page can also ring your real phone (US and Canada). Before it does, it texts you a code, keeps only a keyed hash of the number, and allows one call per number per day. An outbound demo that can dial any number is an abuse tool, so verification is not optional.
-
 ## What this means for you
 
 1. **Never greet first on an outbound call.** Wait for the callee, classify, then speak. AMD pauses your agent's speech while it decides; do not work around it.
 2. **Decide who pays for AMD.** Its defaults call LiveKit Inference. Passing your session's LLM and `stt=None` keeps detection on the providers you already meter.
 3. **Give keypad input a fixed path, and make it barge in.** No model call, an `interrupt()` on every press, and the same state functions the voice path uses.
 
-The [delivery window call source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/delivery-window-call) runs with `uv sync` and `uv run python agent.py dev`, plus a LiveKit outbound trunk for real calls. The LiveKit docs on [outbound calls](https://docs.livekit.io/telephony/making-calls/outbound-calls/) and [DTMF](https://docs.livekit.io/telephony/features/dtmf/) cover trunks, call outcomes and `GetDtmfTask` for collecting longer digit strings.
+The [delivery window call source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/delivery-window-call) runs with `uv sync` and `uv run python agent.py dev`, with no phone line needed. The LiveKit docs on [outbound calls](https://docs.livekit.io/telephony/making-calls/outbound-calls/) and [DTMF](https://docs.livekit.io/telephony/features/dtmf/) cover trunks, call outcomes and `GetDtmfTask` for collecting longer digit strings.
 
 If you are putting agents on outbound calls (reminders, confirmations, collections), voicemail handling and call outcomes are among the first things we check in a [production readiness review](/contact).
