@@ -1,0 +1,11 @@
+1/ Your voice agent stops mid-sentence every time the caller says "mm-hm". Tune it the other way and it talks through "wait, stop". Here is how we tell the two apart on plain VAD, no cloud model needed.
+
+2/ Why VAD gets it wrong: it pauses on any speech, and any final transcript ends the paused sentence. "Mm-hm" has words, so the agent drops its sentence to reply to a nod.
+
+3/ The fix: set min_words high so raw audio never pauses the agent. A small gate reads the interim transcript of anything said over the agent and decides.
+
+4/ Only acknowledgement words (mm-hm, right, got it): keep talking. Any other word, even one: session.interrupt(). No words at all (a cough): ignore it.
+
+5/ When the agent is cut off, LiveKit keeps only the words the caller heard. Use that, never your own copy of the LLM output, or the next reply cites things nobody heard.
+
+6/ We shipped it as a mortgage renewal advisor. Nod, cough, then cut in, and watch each overlap get scored live: https://mahimai.ca/blog/voice-agent-backchannel-vs-barge-in
