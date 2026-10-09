@@ -1,0 +1,15 @@
+1/ Voice checkout shouldn't be a bot beside the product. It should drive the product.
+
+We built one where the agent fills a real checkout form over LiveKit RPC, and the page has the last word.
+
+2/ Every tool call is an RPC to the shopper's browser. The page runs the same validation the keyboard uses: postal code vs province, sizes, stock limits, shipping reach.
+
+3/ When the page rejects a value, it throws an RpcError. The agent turns it into a ToolError, so the model hears the page's own sentence and asks again.
+
+4/ The model never states a price. place_order has to send back the exact total the page computed. Skip the read-back and the page refuses the order.
+
+5/ It works both ways. Type a field on the page and it RPCs the agent, which adds it to the conversation and doesn't ask again.
+
+6/ One catch: RPC rides the data channel. Grant data publish only to the page that answers RPC, and turn off agent text input you don't use.
+
+7/ Live demo and code: https://mahimai.ca/blog/voice-agent-checkout-livekit-rpc
