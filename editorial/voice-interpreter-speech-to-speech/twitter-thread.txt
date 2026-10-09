@@ -1,0 +1,11 @@
+1/ An interpreter is the one voice agent that must never be helpful. Ask it "what time is breakfast?" in Spanish and the right output is the question in English, not an answer. Here is how the front desk interpreter demo gets that right.
+
+2/ Speech to speech fits: one model hears any language and speaks any language. A cascade needs language detection before STT and a TTS voice for whatever comes out, and flattens tone into text in between.
+
+3/ The instructions block failures one by one: interpret in the first person, keep questions as questions, never answer, never summarize, reply in the language the guest has been speaking.
+
+4/ Captions pair each interpretation with what was said. Gotcha: "final" transcripts are segments, not turns. Accumulate them until the interpretation arrives, or long sentences lose their start.
+
+5/ Two people on one call: an AgentSession hears one linked participant. Relink to the active speaker, and skip switching while the agent talks, because its own audio echoes through a mic.
+
+6/ In our playground one visitor plays both the guest and the desk, on GPT-Live. Try it: https://mahimai.ca/blog/voice-interpreter-speech-to-speech

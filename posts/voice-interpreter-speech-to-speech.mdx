@@ -1,0 +1,133 @@
+---
+title: 'Voice Interpreter Agent: Relay, Never Answer'
+description: 'Build a two-way live interpreter with a speech-to-speech model on LiveKit: instructions that stop it answering, captions paired with the source, and two-party audio.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'speech-to-speech', 'translation', 'gpt-live']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** An interpreter is the one voice agent that must never be helpful. Its whole job is to say what was said, in the other language, and stop. A speech-to-speech model fits that job because one model hears any language and answers in any language, with no language detection step between them. The hard parts are not the model. They are the instructions that stop it answering, captions that pair each interpretation with its source, and getting both people's audio into one session. You can play a hotel guest and the front desk below.
+
+"¿A qué hora es el desayuno?"
+
+A good interpreter says "What time is breakfast?" A typical voice assistant says "Breakfast is usually served from seven to ten." That second answer is fluent, friendly and completely wrong, because the guest asked the desk, not the interpreter.
+
+This post walks through the [front desk interpreter demo](https://github.com/mahimairaja/awesome-voice-apps/tree/7ee5154b5b83943dc0e9fa3f587d3bdf221a4338/demos/front-desk-interpreter) in awesome-voice-apps. A guest speaks any language, the desk hears English, and replies go back in the guest's language.
+
+## Why speech to speech
+
+You could build this as a cascade: speech-to-text, a text model that translates, then text-to-speech. For a single language pair that works. For "the guest may speak any language" it gets awkward:
+
+1. **The STT has to know the language before it transcribes.** Either you run language detection on every turn, or you use a multilingual model and hope it guesses right on a two-word reply like "Sí, gracias."
+2. **The TTS has to speak whatever language comes out**, with a voice that sounds right in it.
+3. **Tone is flattened into text in the middle.** A hesitant "I... think so?" arrives at the other side as a flat "I think so."
+
+A speech-to-speech model hears audio and produces audio in one model. Language identification, translation and speaking all happen inside it. The original demo uses Gemini Live, and its file header says what that buys: "no STT, no TTS, no VAD model, no turn detector."
+
+That is a trade, not a free win. You give up per-stage control: you can't swap in a better transcriber for one language, and you can't inspect a clean text transcript before it is spoken. For an interpreter, where the output should track the input as closely as possible, that trade is usually worth it.
+
+## Instructions that forbid helping
+
+The model is perfectly capable of answering the breakfast question. The instructions are what stop it. They are built per call from the desk language:
+
+```python
+def build_instructions(target: str) -> str:
+    return (
+        f"You are a live interpreter on a call between two people. One is a "
+        f"desk clerk who speaks {target}; the other is a guest who may speak "
+        f"any language. ... You interpret between them and do nothing else. "
+        f"When you hear a language other than {target}, say it again in {target}. "
+        f"When you hear {target}, say it again in the language the guest has been speaking. "
+        f"... Interpret faithfully and completely, in the first person, keeping "
+        f"questions as questions. Never answer questions yourself, never add advice "
+        f"or opinions, never summarize."
+    )
+```
+
+Every clause blocks a specific failure:
+
+- **"In the first person."** Without it the model narrates: "She says she has a reservation." A professional interpreter says "I have a reservation", and so should the agent.
+- **"Keeping questions as questions."** The breakfast failure. The model has to say the question, not answer it.
+- **"Never summarize."** A long complaint gets cut to its gist unless you forbid it, and the gist is not what the guest said.
+- **"The language the guest has been speaking."** The model has to remember which language the guest uses, because the desk's English reply carries no hint of it.
+
+The desk language comes from dispatch metadata, which the browser sets. The demo treats it as untrusted input before it goes into the instructions string: it falls back to English when it is empty and caps it at 40 characters. Anything that lands in a system prompt from a client is a prompt injection surface, and a language name has no business being longer than that.
+
+## Captions that pair the source
+
+People trust an interpreter more when they can read along. The demo shows captions with each interpretation under what was actually said. That pairing is less simple than it sounds, because the two halves arrive as different events.
+
+What was said arrives as `user_input_transcribed`. The interpretation arrives as `conversation_item_added` with the assistant's message. The demo holds the first until the second consumes it:
+
+```python
+@session.on("user_input_transcribed")
+def on_user_transcribed(ev):
+    # Finals mark transcription segments, not whole turns, so a long
+    # utterance can emit several. Accumulate until the reply consumes them.
+    text = (ev.transcript or "").strip()
+    if ev.is_final and text:
+        prior = pending["original"]
+        pending["original"] = f"{prior} {text}" if prior else text
+```
+
+The comment is the lesson. "Final" means a final transcription segment, not a final turn. A guest who speaks for ten seconds can produce several finals, and pairing only the last one with the interpretation drops most of the sentence. Accumulate segments, and clear them when the interpretation arrives.
+
+The captions are capped at the last eight rows, and they are sent to the page as a UI event on the `ui` data topic. The audio never depends on them.
+
+## Two people, one session
+
+In the original demo, the guest and the clerk are on their own devices in the same LiveKit room. That raises a problem a single-user agent never sees: an `AgentSession` listens to one linked participant, by default the first to join. The other person would be ignored.
+
+The demo watches the room's active speakers and re-links the session to whoever is talking:
+
+```python
+def on_active_speakers(speakers):
+    if agent_speaking["now"]:
+        return
+    ...
+    for sp in speakers:
+        ...
+        current = getattr(room_io, "linked_participant", None)
+        if current is None or current.identity != sp.identity:
+            room_io.set_participant(sp.identity)
+        break
+```
+
+The guard at the top matters. While the agent is speaking, its own audio can echo through a participant's microphone, which makes that participant "active". Switching then would cut the link mid-interpretation. So the session never switches while the agent talks.
+
+There is one more two-party detail: the guest joins late. The page ignores updates for a component it never mounted, so the guest would miss the captions. Replaying on `participant_connected` races the guest's own data handler. Instead, the joiner asks for the UI once it is listening, on a `ui_request` topic, and the agent replays the current captions to that one participant.
+
+## Hosting it with one visitor
+
+Our playground runs one visitor and one agent per call, and it meters every provider per call. Two changes made the interpreter fit:
+
+- **One person plays both sides.** The visitor speaks as the guest in any language, then answers as the desk in English. The interpreter's rules don't change, because it never needed to know who was speaking. It only needs to know which language it heard. The hosted instructions add one sentence saying so, and the participant switching is not needed.
+- **GPT-Live instead of Gemini Live.** The playground already runs OpenAI's GPT-Live for its sales demo, with per-call metering and limits around it. The hosted interpreter shares that path, so it is still a single speech-to-speech model, just a different vendor's. The caption pairing is the same code idea, moved into a small adapter class.
+
+The adapter also keeps the greeting off the captions (it is not an interpretation), and it ends the call after 30 model responses as a cost guard.
+
+## Try it
+
+Speak as a guest in any language you know, then answer as the desk in English. Ask a question as the guest and check that you hear the question repeated, not answered.
+
+<PlaygroundDemo demo="interp" />
+
+Things worth trying:
+
+- **Ask the interpreter something directly.** "What time is checkout?" in Spanish should come out as the question in English, not an answer.
+- **Speak a long sentence.** The caption should hold all of it, not just the last segment.
+- **Switch languages as the guest.** Start in French, then reply in Spanish, and see which language the desk's next line comes back in.
+
+## What this means for you
+
+If you are building any agent that relays rather than answers (an interpreter, a call whisperer, a note-taker that reads back), these are the parts that decide whether it works:
+
+- **Forbid helpfulness explicitly, failure by failure.** First person, questions stay questions, no summaries, no advice. Each clause blocks something you will otherwise see in testing.
+- **Treat client-set config as input.** Anything from dispatch metadata that reaches the instructions gets a fallback and a length cap.
+- **Pair transcripts on turns, not finals.** Accumulate segments until the response that consumes them.
+- **Plan for more than one human.** One session hears one participant. Relink on active speaker, and don't switch while the agent is talking.
+
+The [front desk interpreter source](https://github.com/mahimairaja/awesome-voice-apps/tree/7ee5154b5b83943dc0e9fa3f587d3bdf221a4338/demos/front-desk-interpreter) runs with `uv sync` and `uv run python agent.py dev` once you add a Google API key and LiveKit keys. Open it on two devices to try the two-party version.
