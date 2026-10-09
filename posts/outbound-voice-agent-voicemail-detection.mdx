@@ -1,0 +1,200 @@
+---
+title: 'Outbound Voice Agent: Voicemail Detection and DTMF'
+description: 'Build an outbound voice agent with LiveKit that dials over SIP, tells a person from a voicemail with AMD, and takes keypad presses without an LLM call.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'outbound-calls', 'sip', 'telephony', 'dtmf']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** An outbound voice agent has three jobs an inbound one never sees: wait for the callee to speak first, decide whether that was a person or a voicemail greeting, and accept keypad presses as well as speech. LiveKit Agents ships answering machine detection (`AMD`) for the second; run it on the session's own LLM and transcripts so it adds no provider. Route keypad presses down a fixed path with no model call, and make speech and keys land in the same functions. You can take the call yourself below.
+
+"Hi, you've reached Sam. I can't take your call right now. Please leave a message after the..."
+
+"Hi Sam! This is Northbound Home calling about your sofa. Can you press 1 to confirm?"
+
+That is the most common failure in outbound voice agents, and it is not a model problem. The agent was built like an inbound agent: it greets as soon as audio connects, so it talks over the greeting, asks a recording to press 1, and leaves a voicemail that starts mid-sentence. Delivery confirmations, appointment reminders and payment follow-ups are all outbound, and a large share of those calls reach a machine.
+
+This post walks through the [delivery window call](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/delivery-window-call) demo in awesome-voice-apps: about 420 lines of Python that wait for the callee, classify who answered, and take a confirmation by key or by voice. The demo runs in the browser, with you as the callee; the dialling step below is what a production deployment adds in front of it.
+
+## Outbound is a different state machine
+
+An inbound agent has one trigger: someone called, so greet them. An outbound agent moves through line states before any conversation exists:
+
+1. **Dialling.** The SIP trunk is placing the call.
+2. **Ringing.** Nothing to do but wait, with a timeout.
+3. **Answered.** Audio is flowing, but you do not know who is on it.
+4. **Classified.** A person, a voicemail you can leave a message on, a mailbox that is full, or a phone menu.
+5. **Conversation or message.** Only now does the agent speak.
+
+The rule that falls out of this: **an outbound agent does not greet first.** It listens to the first utterance, decides, then talks. Everything below is about making that decision fast and making the rest cheap.
+
+## Dialling over SIP
+
+In production, LiveKit places the call by adding a SIP participant to the agent's room, through an outbound trunk from a provider such as Twilio or Telnyx. With `wait_until_answered=True`, the request returns when the callee picks up:
+
+```python
+from livekit import api
+from livekit.agents import get_job_context
+
+await get_job_context().api.sip.create_sip_participant(
+    api.CreateSIPParticipantRequest(
+        room_name=room.name,
+        sip_trunk_id=os.environ["SIP_OUTBOUND_TRUNK_ID"],
+        sip_call_to="+14165550123",
+        participant_identity="callee-phone",
+        ringing_timeout=datetime.timedelta(seconds=25),
+        wait_until_answered=True,
+    ),
+    # The API timeout must outlast the ring window.
+    timeout=40,
+)
+```
+
+While it rings, the participant's `sip.callStatus` attribute reads `dialing`; it turns `active` when they answer. A busy line, a rejected call or a timeout raises `api.SipCallError` with the SIP status code, so 486 means busy and you can say so on screen instead of guessing.
+
+One line before the dial matters more than it looks:
+
+```python
+session.room_io.set_participant("callee-phone")
+```
+
+If anyone else is in the room (in our playground, the visitor's browser watching the call), the session would otherwise listen to whoever joined first. Point it at the callee before any audio arrives.
+
+A voicemail system answers at the SIP layer with a normal `200 OK`. So `wait_until_answered` returns successfully for a machine, and no error tells you it was not a person. That is the job of the next step.
+
+## Who answered: AMD on the providers you already pay for
+
+LiveKit Agents 1.8 includes [answering machine detection](https://docs.livekit.io/telephony/features/answering-machine-detection/). It listens to the start of the call and returns one of five categories: `human`, `machine-vm`, `machine-unavailable`, `machine-ivr` or `uncertain`. While it runs, the agent's speech is paused, which is exactly the "do not greet first" rule enforced for you.
+
+It runs two paths in parallel. A short greeting followed by silence ("Hello?") takes a fast heuristic and settles as human. A longer greeting goes to an LLM classifier once the speaker stops. The documented defaults: speech under 2.5 seconds counts as a short greeting, 0.5 seconds of silence settles it as human, and machine-like speech waits 1.5 seconds of silence before the verdict.
+
+By default, if your project has LiveKit Inference credentials, AMD classifies with its own hosted LLM and STT. That is a sensible default, and a cost line you did not budget for. Our playground meters every call per visitor, so the demo passes the agent's own models instead:
+
+```python
+from livekit.agents import AMD
+
+async with AMD(
+    session,
+    # Reuse this agent's LLM and the session's transcripts, so the classifier
+    # runs on the providers the call already pays for.
+    llm=self.llm,
+    stt=None,
+    participant_identity=self.callee,
+    ivr_detection=False,
+    suppress_compatibility_warning=True,
+    detection_options={"no_speech_threshold": 6.0},
+) as detector:
+    result = await detector.execute()
+```
+
+`stt=None` tells AMD to read the transcripts the session is already producing instead of opening a second STT stream. `suppress_compatibility_warning` is there because our LLM is not on LiveKit's evaluated list; if you can, use one that is (`openai/gpt-4.1-mini` is). `no_speech_threshold` drops from 10 seconds to 6, because a demo call has two minutes and a silent pickup should not burn a twelfth of it.
+
+The branch on the result is short:
+
+```python
+if category == "machine-vm":
+    handle = session.say(voicemail_text(data), allow_interruptions=False)
+    await handle.wait_for_playout()
+    await self._end("voicemail-left")
+elif category in {"machine-unavailable", "machine-ivr"}:
+    await self._end("unavailable")
+else:
+    data["menu"] = "main"
+    if category == "uncertain":
+        # Picked up and said nothing: open the conversation ourselves.
+        session.generate_reply(instructions="The customer picked up but is silent. Introduce the call.")
+```
+
+Two choices in there are deliberate. The voicemail is `session.say` with fixed text, not a generated reply: a message on someone's phone is a record, it should say the same thing every time, and it should spell the order number (`N B - 4 8 2 1 3`) so it is intelligible on playback. And `uncertain` is treated as a person, because the cost of a wrong guess is asymmetric: talking to a silent human is fine, hanging up on one is not.
+
+## Keypad presses skip the model
+
+"Press 1 to confirm, 2 to reschedule" sounds dated until you watch someone on a noisy bus try to say "Thursday afternoon". Keys are unambiguous, and they are free: there is nothing to transcribe and nothing to interpret.
+
+LiveKit delivers DTMF as a room event:
+
+```python
+room.on("sip_dtmf_received", self._on_dtmf)
+
+def _on_dtmf(self, dtmf: rtc.SipDTMF) -> None:
+    sender = dtmf.participant.identity if dtmf.participant else None
+    if sender != self.callee or dtmf.digit not in DIGITS:
+        return
+    asyncio.ensure_future(self.press(dtmf.digit))
+```
+
+Check the sender. Any participant can publish DTMF into a room, and only the callee's keys should move the delivery.
+
+Then the press takes a fixed path. No LLM request, no tool call, no ambiguity:
+
+```python
+async def press(self, digit: str) -> None:
+    data = self.session.userdata
+    if data["stage"] != "human" or data["outcome"]:
+        return
+    if data["menu"] == "main" and digit == "1":
+        reply = self.confirm()
+    elif data["menu"] == "main" and digit == "2":
+        data["menu"] = "reschedule"
+        reply = " ".join(
+            f"Press {i + 1} for {w['label']}." for i, w in enumerate(alternatives(data))
+        ) + " Press 0 to keep the current window."
+    # ... the reschedule menu, and a re-prompt for anything else
+    # A key press barges in, exactly like speech does.
+    self.session.interrupt()
+    handle = self.session.say(reply)
+```
+
+The `interrupt()` is the detail people miss. A caller who knows the menu presses 1 while the agent is still reading it. If the key waits for the sentence to finish, the agent feels slower than a 1995 IVR.
+
+## Speech and keys land in the same function
+
+The customer can also just say "yes, that works" or "can you do Thursday afternoon instead". Those go through the model, which calls tools:
+
+```python
+@function_tool()
+async def reschedule_window(self, context: RunContext[dict], window_id: str) -> str:
+    """Move the delivery to another window.
+
+    Args:
+        window_id: One of the alternative window ids, for example "w2".
+    """
+    data = context.userdata
+    if data["outcome"]:
+        return "Already settled. Say goodbye and call end_call."
+    options = {w["id"]: w for w in alternatives(data)}
+    if window_id not in options:
+        listed = "; ".join(f"{w['id']}: {w['label']}" for w in options.values())
+        return f"Unknown window. Offer these: {listed}"
+    self.reschedule(window_id)
+    return f"Moved to {options[window_id]['label']}. Say a short goodbye and call end_call."
+```
+
+Both paths end in `self.confirm()` and `self.reschedule()`. That is the property that matters in production: the keypad and the model cannot disagree about what "rescheduled" means, the outcome is written in one place, and a test can drive either input and check the same state. The tool also refuses a second change once the call is settled, so a model that calls `reschedule_window` twice does not move the truck twice.
+
+## Try it
+
+You do not need a phone line to try the flow. In the browser, the demo makes you the callee: your microphone stays off while the call "rings", and publishing it is picking up. The keypad sends real DTMF packets with `localParticipant.publishDtmf()`, the same event a phone produces.
+
+<PlaygroundDemo demo="delivery" />
+
+Things worth trying, because they are where outbound agents break:
+
+- Answer with a plain "Hello?". AMD settles as a person in well under a second, and only then does the agent speak.
+- Choose "Answer as my voicemail" and read the greeting on screen. The panel shows the verdict, what it heard and how long it took, then the agent leaves its fixed message and hangs up.
+- Press 2, then 3, while the agent is still talking. The key cuts it off.
+- Say "Thursday afternoon works better" instead of pressing anything.
+- Do nothing. After 25 seconds of ringing the call ends as no answer, like a real dialler.
+
+## What this means for you
+
+1. **Never greet first on an outbound call.** Wait for the callee, classify, then speak. AMD pauses your agent's speech while it decides; do not work around it.
+2. **Decide who pays for AMD.** Its defaults call LiveKit Inference. Passing your session's LLM and `stt=None` keeps detection on the providers you already meter.
+3. **Give keypad input a fixed path, and make it barge in.** No model call, an `interrupt()` on every press, and the same state functions the voice path uses.
+
+The [delivery window call source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/delivery-window-call) runs with `uv sync` and `uv run python agent.py dev`, with no phone line needed. The LiveKit docs on [outbound calls](https://docs.livekit.io/telephony/making-calls/outbound-calls/) and [DTMF](https://docs.livekit.io/telephony/features/dtmf/) cover trunks, call outcomes and `GetDtmfTask` for collecting longer digit strings.
+
+If you are putting agents on outbound calls (reminders, confirmations, collections), voicemail handling and call outcomes are among the first things we check in a [production readiness review](/contact).
