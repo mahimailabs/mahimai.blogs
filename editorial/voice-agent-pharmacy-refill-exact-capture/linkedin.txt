@@ -1,0 +1,17 @@
+"Rx forty-four seventy-one D." The label says B.
+
+Refill lines fail on single characters. B against D. Metformin against metoprolol. Most voice agents hear the code, say "got it", and move on.
+
+What a pharmacy assistant does, in code:
+→ every field is captured as "heard", and only counts once the caller confirms the read-back
+→ the tool checks the value against the file and answers "match" or "no match", never the right answer
+→ codes are rewritten in the TTS node, so 4471-B is spoken as "four, four, seven, one, B as in Bravo"
+→ the transcript is redacted before any line is logged: dates of birth, phone numbers, postal codes
+
+The one I would copy first: keep the record out of the model's context. If the tool returned the correct Rx number on a mismatch, the agent would helpfully read it out, and your refill line becomes a lookup service for anyone who guesses.
+
+We put a pharmacy refill demo in our playground. Read the made-up label, say the wrong letter, and watch it get caught.
+
+Where does your agent still trust the first thing it heard?
+
+https://mahimai.ca/blog/voice-agent-pharmacy-refill-exact-capture

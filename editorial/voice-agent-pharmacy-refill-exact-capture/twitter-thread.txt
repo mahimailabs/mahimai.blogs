@@ -1,0 +1,13 @@
+1/ "Rx forty-four seventy-one D." The label says B. Voice agents that take codes over the phone fail on single characters, and most of them never notice. Here is how we built a refill line that does.
+
+2/ Give every field a state. Heard is not confirmed. The agent captures a value, reads it back, and only a "yes" from the caller moves it to confirmed. The refill tool counts confirmations, not captures.
+
+3/ Keep the record out of the model. The tool compares against the prescription on file and says "match" or "no match". Never the right answer, or the agent will read it out to whoever is guessing.
+
+4/ Spell codes in the TTS node, not the prompt. The model writes 4471-B. The voice says "four, four, seven, one, B as in Bravo". Transcript, tools and screen all agree on the value.
+
+5/ Streaming catch: "M5V" can arrive before "2T6". Release text only at safe word breaks, and hold back a break inside a code.
+
+6/ Redact at the boundary where data leaves the call. The model needs the date of birth; the call log does not.
+
+7/ Try it on a made-up prescription, with the code: https://mahimai.ca/blog/voice-agent-pharmacy-refill-exact-capture
