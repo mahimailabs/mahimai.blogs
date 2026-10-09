@@ -1,0 +1,14 @@
+1/ "Yeah, it's 42... uh... Maple Street." A voice agent on a silence timer cuts that caller off after "42". We built a furnace repair line that runs two endpointers on the same audio and shows you every cut.
+
+2/ VAD plus a timeout ends the turn after ~0.5 s of silence. People pause longer than that exactly when giving the details you need: house numbers, phone numbers, "uh" before a street name.
+
+3/ An end-of-turn model predicts whether the speaker is done. Below the threshold, the session waits up to the long delay and cancels the moment they speak again. Above it, it commits fast.
+
+4/ Measure it before you argue about it: keep the detector live, and log where a silence timer would have committed. In LiveKit that is the user_state_changed "listening" event. A caller resuming before the commit is a cut-off you avoided.
+
+5/ Memory bill: local v1-mini took our shared worker from 217 MB to 477 MB. The hosted demo uses v1 on LiveKit Inference with local_fallback=False: ~5 MB per call, nothing at idle.
+
+6/ Keep the read-back anyway. Better endpointing makes cut-offs rarer; reading the address back makes them harmless.
+
+7/ Call the line and pause all you like:
+https://mahimai.ca/blog/voice-agent-end-of-turn-detection
