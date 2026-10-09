@@ -1,0 +1,11 @@
+1/ "Thank you for holding. Your call is important to us." Revenue cycle teams hear that all day on payer calls. We built a voice agent that sits through it, notices when a person picks up, and captures benefits into a checked record.
+
+2/ The phone tree: hard-coding "press 3" breaks the day the payer reshuffles its menu. The agent hears each menu, the LLM picks keys, and code sends them as DTMF. If the model times out, a known route takes over.
+
+3/ Menus and hold music never enter the model's context (add_to_chat_ctx=False). When the rep picks up, the conversation starts clean.
+
+4/ Hold: every transcript is classified as recording or person in on_user_turn_completed, before any reply. StopResponse keeps it silent. A word-for-word repeat is always a recording, whatever the model says.
+
+5/ The rep's answers go through one tool with nullable args. Plain Python normalises, range-checks, flags met > deductible as a conflict, keeps corrections and stores the quote each value came from.
+
+6/ You can play the payer rep in our playground. Try "please continue to hold" first. https://mahimai.ca/blog/voice-agent-insurance-eligibility-verification

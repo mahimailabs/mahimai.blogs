@@ -1,0 +1,7 @@
+Blog cover, 16:9, 1600x900. The playground card (public/images/playground/payer-verification.webp in mahimai.ca) is the black-stage diagram; this cover is for the blog and social only.
+
+Style: soft painterly illustration matching the existing playground covers: warm cream plaster wall with dappled window light and leaf shadows, pale wood desk, muted lavender accents.
+
+Subject: a clinic front-office desk with a desk phone on speaker (a small lavender glow on its keypad), a printed insurance card face down (no readable text), a clipboard with a blank form, a coffee mug, and a matte black desk microphone with a thin lavender ring.
+
+Composition: objects left to right along the desk, generous empty wall above for overlay, eye level, shallow depth of field, morning light from the upper right. Calm mood. No people, no readable text, no logos, no insurer brand marks, no UI.
