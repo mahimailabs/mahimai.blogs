@@ -1,0 +1,13 @@
+1/ "Pipeline or speech-to-speech?" is the first question every voice platform team asks. Spec sheets can't answer it, because the difference is how the call feels. So we built a blind test you can take.
+
+2/ A mock interview with two unlabelled interviewers in one LiveKit call. One is Deepgram + gpt-4o-mini + Cartesia. The other is GPT-Live, full duplex. Random order. You vote for the more human one before the reveal.
+
+3/ Both live in the same AgentSession. Each Agent brings its own models, and session.update_agent() swaps them mid-call. The duplex agent sets turn_detection="realtime_llm" so the session's VAD doesn't take its turns away.
+
+4/ The handoff is code, not a tool call. A desk listens to session events (they survive handoffs), counts committed answers, and swaps interviewers after the "thank you".
+
+5/ Every reply is timed with LiveKit's e2e_latency: end of your speech to first audio. Pipeline turns also show turn decided, first token, first audio. Duplex can start talking before you stop. We flag that instead of calling it 0 ms.
+
+6/ The vote is scored server-side from the reservation id, the same rule the worker used to seat the interviewers. The page never gets to say which architecture you picked.
+
+7/ Try it, then read the caveats (different voices, untuned pipeline, asymmetric cost): https://mahimai.ca/blog/full-duplex-vs-cascade-voice-agent
