@@ -1,0 +1,5 @@
+Blog cover, 16:9, 1600x900. The playground card (public/images/playground/panel-scribe.webp in mahimai.ca) is currently rendered from the demo's black-stage diagram; replace it with a 3:2 crop of this cover if it matches the other cards.
+
+Match the existing playground cards (coffee-counter.webp, quick-trivia.webp): soft painterly illustration, warm cream plaster wall with dappled window light and leaf shadows, pale wood table, muted lavender accents.
+
+Subject: a small meeting table with three folded paper name cards (blank, no text), three coffee cups at different fill levels, a printed scorecard sheet with three rows and hand-drawn lavender check marks, and a matte black desk microphone with a thin lavender ring in the centre of the table. No people, no readable text, no logos.

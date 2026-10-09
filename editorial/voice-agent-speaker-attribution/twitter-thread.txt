@@ -1,0 +1,11 @@
+1/ Put a normal voice agent in a hiring debrief and it answers every line meant for the other interviewers. A scribe has to know who is speaking and when not to talk. Here is the pattern.
+
+2/ Decide silence in code. LiveKit's on_user_turn_completed runs before the LLM. Raise StopResponse unless the turn contains the trigger word. Forty turns of debrief become one model call.
+
+3/ Put the label in the message: "[Speaker 2] she rushed the caching question". The recap prompt then reads a transcript with names on it. No join step. If the diarizer has no label, leave the line unlabelled instead of guessing.
+
+4/ Diarization is a sidecar: stt_node tees each frame into a bounded queue for pyannoteAI Live. If it falls behind it drops frames, and transcription carries on.
+
+5/ The scorecard is a typed tool call. list[dict] fails OpenAI strict mode (additionalProperties must be false). A Pydantic row with Literal leans fixes it and lets the UI validate.
+
+6/ In our playground one visitor plays all three seats and says "engineer here" to switch. Same interface as the diarizer, so the rest of the agent is unchanged. Try it: https://mahimai.ca/blog/voice-agent-speaker-attribution
