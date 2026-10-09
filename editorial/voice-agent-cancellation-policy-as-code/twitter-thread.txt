@@ -1,0 +1,13 @@
+1/ "Before you go, I can do seventy percent off for a year." No one approved that offer. A retention agent with only a prompt between it and a discount will eventually say it. We built a cancel line where the rules are code instead.
+
+2/ Code hears "cancel", not the model. A hook runs on every finished caller turn before the LLM, records the request and starts a three-turn clock. A model with a retention prompt has every reason to hear "cancel" late.
+
+3/ One offer, chosen by code from the caller's reason. Price gets half off, not watching gets a pause, switching gets nothing. The model can ask for "the offer". It can never name one.
+
+4/ Required words are spoken by code. The "you can say cancel at any time" disclosure and the confirmation number go in front of the model's text in the TTS node.
+
+5/ Every sentence is screened before the voice. "Are you sure?", "you'll lose your history", and any percentage the policy did not approve are dropped and logged.
+
+6/ The backstop: decline the offer or stall for three turns and code cancels. StopResponse means the model gets no turn, session.say reads the number, interruptions off.
+
+7/ Try to haggle with it, and read the code: https://mahimai.ca/blog/voice-agent-cancellation-policy-as-code
