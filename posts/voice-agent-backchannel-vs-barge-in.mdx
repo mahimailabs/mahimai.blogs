@@ -1,0 +1,213 @@
+---
+title: 'Voice Agent Interruptions: Backchannel vs Barge-In'
+description: 'Stop your voice agent from halting on every "mm-hm". A LiveKit backchannel gate that keeps talking through nods and stops on a real word.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'interruptions', 'turn-taking', 'backchannel']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** Voice activity detection cannot tell "mm-hm" from "wait, stop", so a VAD-only agent either halts on every nod or ignores real interruptions. Raise LiveKit's `min_words` floor so raw audio never pauses the agent, then let a small gate read the interim transcript of any overlapping speech: acknowledgement words keep the agent talking, any other word calls `session.interrupt()`. LiveKit already trims the interrupted reply to the words the caller heard, so the model's memory matches the call. You can try it on a made-up mortgage renewal below.
+
+"So with a five-year fixed, your payment would go from two thousand and seven..."
+
+"Mm-hm."
+
+"...sorry, did you have a question?"
+
+That exchange is the most common complaint I hear about voice agents in advisory calls. People nod out loud. They say "right" and "okay" and "mm-hm" to show they are following, and a naive agent treats every one of those sounds as a request for the floor. It stops mid-sentence, apologises, and asks a question nobody asked. Do that three times in a mortgage call and the caller stops nodding, which is worse: now they are silent, and you cannot tell if they are still there.
+
+The opposite failure is just as bad. Tune the agent to ignore short sounds and it talks straight through "wait, stop". On a call about the biggest debt someone holds, an agent that will not stop when asked is a compliance problem, not a UX problem.
+
+This post walks through the [mortgage renewal demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/mortgage-renewal) in awesome-voice-apps: an advisor at a fictional bank who keeps talking through nods and stops on a real word, with a panel that scores every overlap as it happens.
+
+## Why VAD alone gets this wrong
+
+In a cascaded pipeline (STT, LLM, TTS), interruption starts with voice activity detection. LiveKit Agents watches the caller's audio while the agent speaks. When VAD reports speech longer than `min_duration` (0.5 seconds by default), the session pauses the agent's audio. What happens next depends on the transcript:
+
+- **No words arrive** within `false_interruption_timeout` (2 seconds by default): the [docs call this a false interruption](https://docs.livekit.io/agents/logic/turns/#false-interruptions). With `resume_false_interruption` on, the agent resumes where it paused and the session emits `agent_false_interruption`.
+- **A final transcript arrives**: the paused speech is interrupted for good, and the transcript becomes a new user turn the agent replies to.
+
+That second rule is the whole problem. "Mm-hm" has words. Deepgram transcribes it faithfully, the final transcript lands, and the agent drops its sentence to reply to a nod. A cough is handled well (no words, so it resumes), but a backchannel is handled like a question.
+
+LiveKit has a real answer for this: [adaptive interruption handling](https://docs.livekit.io/agents/logic/turns/adaptive-interruption-handling/), a model that classifies overlapping audio as a backchannel or a true interruption. The docs describe it as the default mode for agents deployed to LiveKit Cloud. Our playground worker runs on Railway with plain VAD, and many teams I work with self-host for the same reasons (data residency, cost control, an existing Kubernetes footprint). So the question is what you do in `"vad"` mode.
+
+## The pattern: hand the decision to a gate
+
+Two knobs make this possible. `min_words` is the minimum number of transcribed words before speech counts as an interruption, and it is checked both when VAD would pause the agent and when a finished user turn would interrupt it. Set it high and the framework never pauses the agent on its own. Then a gate that you own decides, from the interim transcript, whether to call `session.interrupt()`.
+
+```python
+GATE_MIN_WORDS = 50
+TURN_HANDLING = {
+    "turn_detection": "vad",
+    "interruption": {"mode": "vad", "min_words": GATE_MIN_WORDS},
+}
+
+session = AgentSession(
+    stt=deepgram.STT(model="nova-3"),
+    llm=openai.LLM(model="gpt-4o-mini"),
+    tts=cartesia.TTS(model="sonic-2"),
+    vad=silero.VAD.load(),
+    turn_handling=TURN_HANDLING,
+)
+```
+
+Fifty words is not a tuning value. It is a way of saying "never on your own": nobody nods for fifty words. Everything shorter is the gate's call.
+
+The gate itself is a word classifier. Anything made only of acknowledgement words is a backchannel. Any other word is a barge-in. No words at all is noise.
+
+```python
+BACKCHANNEL_WORDS = frozenset(
+    {"mm", "mhm", "mmhm", "hmm", "uh", "um", "uhhuh", "ok", "okay",
+     "right", "yeah", "yep", "yes", "sure", "cool", "alright", "gotcha"}
+)
+BACKCHANNEL_PHRASES = (("makes", "sense"), ("got", "it"), ("i", "see"))
+
+
+def words(text: str) -> list[str]:
+    return re.findall(r"[a-z']+", text.lower().replace("-", ""))
+
+
+def classify(text: str) -> str:
+    tokens = words(text)
+    if not tokens:
+        return "noise"
+    i = 0
+    while i < len(tokens):
+        for phrase in BACKCHANNEL_PHRASES:
+            if tuple(tokens[i : i + len(phrase)]) == phrase:
+                i += len(phrase)
+                break
+        else:
+            if tokens[i] not in BACKCHANNEL_WORDS:
+                return "barge-in"
+            i += 1
+    return "backchannel"
+```
+
+The list in the repository is longer, and that is the point of owning it. "Yes" is a nod mid-sentence in English, but for a bilingual line you would add "oui" and "d'accord". A collections agent might treat "no" as a hard stop and log it. You can read, test and change this in a pull request, which you cannot do with a model's threshold.
+
+Notice what is not in the list: "wait", "stop", "no", "but", "what". The rule is not "interrupt on stop words". It is "interrupt on anything that is not a nod", so "variable?" on its own stops the agent too. Fillers like "um" and "uh" count as neutral, so "um, wait" interrupts on "wait" and not before.
+
+## Wiring it to the session
+
+The gate is driven by four session events. Here is the shape of it, with the bookkeeping trimmed:
+
+```python
+def watch(self, session: AgentSession) -> None:
+    gate = self.gate
+
+    session.on("agent_state_changed",
+               lambda e: gate.on_agent_state(e.new_state, e.created_at))
+    session.on("user_state_changed",
+               lambda e: gate.on_user_state(e.new_state, e.created_at))
+    session.on("user_input_transcribed",
+               lambda e: gate.on_transcript(e.transcript, e.is_final, e.created_at))
+    session.on("conversation_item_added", self._on_item)
+```
+
+An overlap opens when the caller starts speaking while the agent is in the `speaking` state. Every interim transcript re-scores it, and the first time the running text classifies as a barge-in the gate interrupts:
+
+```python
+def on_transcript(self, text: str, final: bool, at: float) -> None:
+    ...
+    current["said"] = " ".join(filter(None, [current["final"], text])).strip()
+    if final:
+        current["final"] = current["said"]
+    if classify(current["said"]) == "barge-in" and not current["interrupted"]:
+        current["interrupted"] = True
+        current["decided_at"] = at
+        if self.agent_speaking:
+            self.interrupt()  # session.interrupt()
+```
+
+Interim transcripts matter here. Deepgram streams partial results while the caller is still talking, so the gate can act on "wait" before the caller has finished "wait, what about variable". Waiting for the final transcript would add the endpointing delay on top.
+
+When the caller stops, the gate waits 0.8 seconds for the final transcript, then scores the overlap and publishes it to the page. If the caller starts again inside that window, the pending score is dropped and the overlap continues, so "mm... hmm, okay" is one nod, not three.
+
+One edge case needs its own rule. If the caller says "mm-hm" just as the agent finishes a sentence, the agent is no longer speaking when the turn ends, so the framework treats it as a normal turn and the model replies to a nod. The agent catches that in `on_user_turn_completed`:
+
+```python
+async def on_user_turn_completed(self, turn_ctx, new_message) -> None:
+    # A nod that outlived the agent's sentence is still a nod: no reply.
+    if self.gate.ignore_turn(new_message.text_content or "", time.time()):
+        raise StopResponse()
+```
+
+`ignore_turn` returns true only when the text is not a barge-in and the overlap began while the agent was talking. A plain "okay" after the agent asks "fixed or variable?" still gets an answer.
+
+## The model only remembers what the caller heard
+
+Stopping fast is half the job. The other half is what the agent thinks it said.
+
+When speech is interrupted, LiveKit [truncates the conversation history to the portion the user heard](https://docs.livekit.io/agents/logic/turns/#interruptions). It uses the audio playback position and a synchronized transcript to cut the assistant message at the word that was playing, and marks the message `interrupted`. If the agent planned "your payment stays at two thousand four hundred and sixty four dollars, and if rates rise you are protected" and the caller cut in after "and if rates", the history holds only the words up to "and if rates".
+
+This is why you should not keep your own copy of "what the agent said" from the LLM output. That copy contains sentences the caller never heard. If the next reply says "as I mentioned, you're protected if rates rise", the caller hears a claim that was never made. In a regulated conversation that is a real problem.
+
+The demo shows the cut on screen. It tees the text going into TTS so it knows what the agent meant to say, and when `conversation_item_added` delivers an interrupted assistant message, it splits the plan at the heard word count:
+
+```python
+async def tts_node(self, text, model_settings):
+    planned: list[str] = []
+    self._planned = planned
+
+    async def tee():
+        async for chunk in text:
+            planned.append(chunk)
+            yield chunk
+
+    async for frame in super().tts_node(tee(), model_settings):
+        yield frame
+```
+
+The panel draws the heard part underlined and the rest struck through. The instructions tell the model the same thing in words: if the previous message ends abruptly, the caller heard nothing after it, so answer them first and offer to pick up from there.
+
+## Try it
+
+Your mortgage at a fictional bank renews next month. Let the advisor explain the options and say "mm-hm" or "right" as it goes. Cough. Then cut in with "wait, what about variable?" Each overlap appears on the panel with its verdict, how long the agent took to stop, and where your interruption cut its sentence.
+
+<PlaygroundDemo demo="mortgage" />
+
+Rates and balances are illustrative and nothing is saved. The call runs on the same Deepgram, `gpt-4o-mini` and Cartesia stack as the rest of the playground.
+
+## How it compares
+
+| Approach | "mm-hm" | Cough | "wait" | Where it runs |
+| --- | --- | --- | --- | --- |
+| VAD only, defaults | Stops and replies | Pauses, then resumes | Stops | Anywhere |
+| VAD with `min_words: 2` | Keeps talking | Keeps talking | Ignored (one word) | Anywhere |
+| Backchannel gate | Keeps talking | Keeps talking | Stops on the interim transcript | Anywhere |
+| Adaptive interruption | Keeps talking | Classified from audio | Stops | LiveKit Cloud deployments |
+
+`min_words: 2` is the setting most teams reach for first, and the table shows why it is not enough: it cannot tell a one-word nod from a one-word command. The gate costs nothing extra (it reads transcripts you already pay for) but depends on the STT producing interim results quickly. The adaptive model works on the audio itself, so it does not wait for a transcript at all; if you deploy on LiveKit Cloud, measure it against the gate on your own calls before choosing.
+
+My take: whichever you pick, do not ship interruption behaviour you cannot see. Score every overlap in production the way the panel does, as a barge-in, a backchannel or noise, with the time to stop. It is the fastest way to find the call where your agent talked over someone saying no.
+
+## Testing it
+
+The gate is plain Python driven by timestamps, so the tests feed it events and assert on what it did:
+
+```python
+def test_stops_on_a_real_word_and_records_the_cut(self):
+    gate, published, pending, interrupts = self.mortgage_gate()
+    gate.on_agent_state("speaking", 10.0)
+    gate.on_user_state("speaking", 11.0)
+    gate.on_transcript("uh", False, 11.1)
+    self.assertFalse(interrupts)
+    gate.on_transcript("uh wait", False, 11.35)
+    self.assertEqual(interrupts, [True])
+```
+
+A nod over the agent, a cough, a barge-in with its latency, a late cut, and a caller who pauses mid-nod are each one test, and none of them calls a provider. The hosted worker tests also check that this demo's `min_words` floor applies only to its own sessions: every other playground demo keeps the default VAD interruption.
+
+## What this means for you
+
+1. **Log every overlap before you tune anything.** Barge-in, backchannel or noise, with the time from the caller's first sound to the agent going quiet. Without it you are tuning `min_duration` by feel.
+2. **Decide interruptions from words when you run VAD.** Raise `min_words` so audio alone never stops the agent, and own a backchannel list you can test, version and localise.
+3. **Never keep your own record of what the agent said.** Use the interrupted message LiveKit stores, which ends at the word the caller heard, and tell the model that a cut-off message means the rest was never said.
+
+The [mortgage renewal source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/mortgage-renewal) runs with `uv sync` and `uv run python agent.py console` once you add LiveKit, Deepgram, OpenAI and Cartesia keys. The [turns overview](https://docs.livekit.io/agents/logic/turns/) documents every interruption option used here.
+
+Turn-taking and interruption behaviour is one of the first things we measure in a [production readiness review](/contact), because it is where a demo that felt fine turns into a call that feels rude.
