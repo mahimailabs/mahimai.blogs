@@ -1,0 +1,192 @@
+---
+title: 'Insurance Eligibility Voice Agent: IVR, Hold, Human'
+description: 'Build a voice agent that calls a payer: send DTMF through the phone tree, wait on hold, detect the human, and extract benefits into a checked record.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'healthcare', 'dtmf', 'structured-extraction']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** An agent that verifies insurance benefits by phone has three jobs before it can say anything useful: press the right keys in a menu it has never heard, sit through hold without talking to the music, and notice the moment a person picks up. Then it has to turn that person's fast, messy answers into a record you can trust. Let the model choose keys but send them as real DTMF with a deterministic fallback, classify every line on hold as recording or person with a loop check the model cannot override, and put every value the rep says through a tool that normalises, range-checks and keeps the words it came from. You can play the payer rep below.
+
+"Thank you for holding. Your call is important to us."
+
+Somewhere in every clinic's back office, a person is listening to that sentence on speakerphone. Eligibility and benefits verification is the call nobody wants: dial the payer, press through a phone tree, enter the NPI, wait, and then copy a copay, a deductible and a reference number off a rep who reads them faster than you can type. Payer portals and X12 270/271 transactions cover a lot of it, but not everything, so revenue cycle teams still make these calls every day.
+
+It is also a call a voice agent can take off their hands, if it gets three things right that most agents never have to think about. The [payer verification demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/payer-verification) in awesome-voice-apps does all three, against a simulated insurer whose menu changes on every call.
+
+## Part one: the phone tree
+
+The agent places the call, so nobody greets it. It hears a menu:
+
+> Thank you for calling Harborline Health. Calls may be recorded. For pharmacies, press 1. For members, press 2. For providers and doctor's offices, press 3.
+
+Hard-coding "press 3" is the obvious move and the wrong one. Payers reshuffle menus, add a Spanish option, insert a COVID announcement, and your script presses 3 into the pharmacy line. In the demo the simulated payer shuffles its options on every call, so the only way through is to listen.
+
+The agent asks its own LLM for a single tool call per menu:
+
+```python
+@function_tool
+async def press_keys(keys: str, reason: str) -> None:
+    """Press keys on the phone keypad.
+
+    Args:
+        keys: Keys to press in order, for example "2" or "1234567893#". Empty to wait.
+        reason: Why these keys, in under ten words.
+    """
+
+
+async def choose_keys(self, prompt: str) -> tuple[str, str, str]:
+    """Pick keys for a menu the way it was heard. Returns (keys, reason, how)."""
+    try:
+        async with asyncio.timeout(DECIDE_TIMEOUT):
+            args = await self.ask(NAVIGATOR, f'The menu says: "{prompt}"', press_keys)
+        if args is not None:
+            keys = payer.clean_keys(str(args.get("keys", "")))
+            return keys, str(args.get("reason", ""))[:80], "model"
+    except Exception:
+        logger.warning("menu choice failed; using the fallback path", exc_info=True)
+    # The deterministic path keeps the call moving if the model is slow or down.
+    return self.line.expected(), "model unavailable, known route", "fallback"
+```
+
+Three details carry the weight.
+
+**The decision runs while the menu plays.** The agent starts `choose_keys` as soon as it has the menu text and awaits it after the prompt finishes, the way a person thinks while listening. Waiting for the end of the menu and then calling the model adds a pause that some IVRs treat as "no input".
+
+**The keys go out as DTMF, not as speech.** `send_keys` calls `publish_dtmf` for each key, the same call LiveKit's own `send_dtmf_events` tool makes. On a SIP call that reaches the payer as an RFC 4733 telephone event; in the browser demo you also hear the dual tones, because the agent plays them on the line:
+
+```python
+async def send_keys(self, keys: str) -> None:
+    """Send each key as a DTMF event and play its tones, the way a phone does."""
+
+    async def events() -> None:
+        for key in keys:
+            try:
+                # On a SIP call this reaches the payer as an RFC 4733 event.
+                await self.room.local_participant.publish_dtmf(
+                    code=payer.DTMF_CODE[key], digit=key
+                )
+            except Exception:
+                logger.debug("dtmf event not delivered", exc_info=True)
+            await asyncio.sleep(0.16)
+
+    if keys:
+        sender = asyncio.ensure_future(events())
+        await self.play(payer.dtmf_audio(keys))
+        await sender
+```
+
+**The menu never enters the conversation.** Phone tree prompts and hold music are spoken with `add_to_chat_ctx=False`. When the rep finally picks up, the model's context holds the rep and nothing else, which keeps it short and stops the model from "answering" a recording.
+
+The NPI prompt is a nice test of the split between model and code. The model reads "enter your ten digit N P I, followed by the pound key" and returns `1234567893#`. The simulated payer checks it the way payers do, with the Luhn check digit over the `80840` prefix, and rejects anything else. Two wrong entries fall through to a representative, which is also how most real IVRs behave.
+
+## Part two: hold, and the moment a person picks up
+
+On hold, the agent must stay silent, and it must stop being silent the instant a human speaks. Get the first wrong and it chats to the hold music. Get the second wrong and the rep says "Hello? Hello?" and hangs up.
+
+Every final transcript during hold goes through a classifier before the model is allowed to reply:
+
+```python
+async def on_user_turn_completed(self, turn_ctx, new_message) -> None:
+    data = self.session.userdata
+    text = (new_message.text_content or "").strip()
+    stage = data["stage"]
+    if stage == "hold" and text:
+        verdict, reason, signals = await self.classify(text)
+        data["hold"].append({"heard": text[:120], "verdict": verdict, "reason": reason, ...})
+        data["heard"] = (data["heard"] + [text])[-6:]
+        if verdict == "human":
+            self.take_over()
+            self.heard = text
+            return
+        publish(self.room, data)
+        raise StopResponse()
+    if stage in {"human", "verified"}:
+        self.heard = text
+        return
+    # Dialling, the phone tree, or after the call: nobody to answer yet.
+    raise StopResponse()
+```
+
+`on_user_turn_completed` is the right hook because it runs after the turn is committed and before the LLM reply starts. `StopResponse` drops the reply. Returning normally lets the reply happen, so the human gets an answer on the same turn that detected them: no extra round trip.
+
+`classify` asks the model for a `report_speaker` verdict, but it does not trust the model alone:
+
+```python
+def hold_signals(text: str, heard: list[str]) -> dict:
+    """Cheap evidence about whether a line on hold is a recording or a person."""
+    low = text.lower()
+    scripted = [p for p in HOLD_PHRASES if p in low]
+    cues = [c for c in HUMAN_CUES if c in low]
+    norm = re.sub(r"[^a-z ]", "", low).strip()
+    repeated = bool(norm) and any(re.sub(r"[^a-z ]", "", h.lower()).strip() == norm for h in heard)
+    return {"scripted": scripted[:3], "cues": cues[:3], "repeated": repeated}
+```
+
+A transcript that repeats an earlier one word for word is a recording, whatever the model says. Hold announcements loop; people do not repeat themselves exactly. LiveKit ships the same idea for IVR loops as a TF-IDF loop detector inside its IVR activity. The phrase signals do a second job: if the model call fails or times out, `fallback_verdict` decides from them, and it leans toward "recording", because staying on hold a turn too long is cheaper than talking over an announcement.
+
+When the verdict is human, `take_over` cancels the hold loop, interrupts whatever the line was playing, switches the voice back from the IVR voice to the agent's, and lets the reply through. The agent's first sentence says who it is, that it is an AI assistant, and why it is calling.
+
+## Part three: a structured record from a messy conversation
+
+Reps do not read benefits in order. They say "She's active, PPO Choice, in network, specialist is thirty, no sorry, fifty, deductible fifteen hundred with four twenty met." That one breath holds six fields and a correction.
+
+The model's job is to hear it. Storing it is a tool's job:
+
+```python
+@function_tool()
+async def record_benefits(
+    self,
+    context: RunContext[dict],
+    coverage: Literal["active", "inactive"] | None = None,
+    plan: str | None = None,
+    network: Literal["in", "out"] | None = None,
+    specialist_copay_usd: float | None = None,
+    deductible_usd: float | None = None,
+    deductible_met_usd: float | None = None,
+    coinsurance_percent: float | None = None,
+    prior_auth_required: bool | None = None,
+    reference_number: str | None = None,
+    rep_name: str | None = None,
+) -> str:
+    """Record eligibility and benefits the rep just stated. Pass only what they said."""
+```
+
+Every argument is optional and nullable, which is what OpenAI strict tool schemas need, and it means one call can carry whatever subset the rep just said. The tool hands the values to plain Python, `payer.apply`, which the model never sees:
+
+- **Normalise.** Money becomes a number with a display form (`$1,500`). Coinsurance given as `0.2` becomes `20%`. A reference spoken as "H B 4 2, K one one eight" becomes `HB42K118`.
+- **Range-check.** A $9,000 copay or 140% coinsurance is refused with a note to ask again, instead of being stored.
+- **Cross-check.** Met cannot exceed the deductible. If it does, the field is marked `conflict`, it counts as missing, and the note tells the model to ask the rep to confirm both numbers.
+- **Keep the source.** Each field stores the rep's words it came from. When someone in billing asks "where did $50 come from?", the answer is a quote, not a guess.
+- **Keep corrections.** A new value for a filled field keeps the old one as `prev`. The panel shows it struck through.
+
+The tool's return value is the model's next instruction: what it recorded, any problems, and what is still needed. The model asks for at most two missing items at a time, and `finish_verification` refuses to close until every required field is in. If the rep says the plan is inactive, the required set shrinks to the status and a reference number, because there are no benefits to read.
+
+On success, the agent reads the reference number back one character at a time (the tool spells it, so the model cannot paraphrase it), and the record comes out shaped like the benefits part of a 271 response, ready for a practice management system.
+
+## Try it: you are the rep
+
+Sign in to use the short daily allowance across the playground demos. The insurer, the patient and the benefits are made up, and your "screen" changes on every call.
+
+<PlaygroundDemo demo="payer" />
+
+Things worth trying:
+
+- Stay quiet through the menus and watch the keys it sends. The menu order is different next call.
+- When the hold music starts, say "please continue to hold". It keeps waiting.
+- Then pick up as yourself: "Harborline provider services, this is Dana."
+- Read the benefits out of order and change a number halfway. Watch the struck-through value.
+- Say the met amount is higher than the deductible. It asks you to confirm both.
+
+## What this means for you
+
+1. **Let the model choose, let code act.** The model reads menus; DTMF events, check digits and the fallback route are code. Your call never stalls because a model call did.
+2. **Treat hold as a classification problem with a veto.** A cheap loop check that the model cannot override prevents the most embarrassing failure: an agent chatting to hold music.
+3. **Extract into a validated record, with provenance.** Normalise, range-check, cross-check and keep the quote. A benefits record without its source is just another thing billing has to re-verify.
+
+The [payer verification source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/payer-verification) runs with `uv sync` and `uv run python agent.py console` once you add LiveKit, Deepgram, OpenAI and Cartesia keys, and its tests need no keys. To call a real payer, dial out through a SIP trunk with LiveKit's [outbound calling](https://docs.livekit.io/telephony/making-calls/outbound-calls/) and drop the simulated line; the DTMF path already works over SIP.
+
+If your team is automating payer calls, prior auth follow-ups or any outbound call that meets an IVR, phone tree handling and hold detection are among the first things we test in a [production readiness review](/contact).

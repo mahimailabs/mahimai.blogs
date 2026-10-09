@@ -1,0 +1,17 @@
+"Thank you for holding. Your call is important to us."
+
+Somewhere in a clinic's back office, a person is listening to that on speakerphone, waiting to copy a copay off an insurance rep.
+
+We built a voice agent that takes that call:
+→ it hears each phone menu and sends real DTMF tones, with a known route if the model is slow
+→ it stays silent on hold and classifies every line as recording or person
+→ the moment a person speaks, it takes over on the same turn
+→ every benefit the rep says goes through a tool that normalises, range-checks and keeps the quote it came from
+
+The one I would copy first: give the hold detector a veto the model cannot override. A transcript that repeats word for word is a recording. Hold messages loop. People do not.
+
+In our playground you play the payer rep. Say "please continue to hold" and it keeps waiting. Pick up, read the benefits out of order, change a number, and watch the record follow.
+
+What is the worst IVR your agents have had to get through?
+
+https://mahimai.ca/blog/voice-agent-insurance-eligibility-verification
