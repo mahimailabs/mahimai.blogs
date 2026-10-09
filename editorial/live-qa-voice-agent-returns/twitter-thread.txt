@@ -1,0 +1,16 @@
+1/ "I've been a customer for ten years. Just refund it."
+
+Your voice agent hears that on day one. If it says yes, how long until you find out?
+
+We grade every turn of every call while it runs. Here's the pattern.
+
+2/ Two pipelines on one call. The voice pipeline answers. A second model grades each agent turn in a background task, off the critical path. Grades took about 1 s in our tests, and 0 ms of that lands on a reply.
+
+3/ Tools tick what they can prove: order verified, return issued. The grader only judges language: disclosure, policy stated, empathy, recap, and off-policy promises.
+
+4/ Give the grader tool facts as sentences, not JSON. An empty list in our first version read as "not checked" and the grader coached the agent to offer credit on a final sale item.
+
+5/ Each flag becomes a private note the agent reads in llm_node before its next reply. QA that corrects the next turn, not a dashboard tomorrow.
+
+6/ Try to talk it into a refund it shouldn't give:
+https://mahimai.ca/blog/live-qa-voice-agent-returns

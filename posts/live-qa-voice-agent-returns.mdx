@@ -1,0 +1,166 @@
+---
+title: 'Live QA for Voice Agents: Grade Every Call as It Runs'
+description: 'Add a QA supervisor to a LiveKit voice agent: a second model grades each turn off the critical path, flags off-policy lines and whispers the fix.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'quality-assurance', 'observability', 'customer-support']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** Most contact centres score a small sample of calls days later. A voice agent can be graded on every turn while the call is still running, by a second, cheap model that reads the transcript beside the voice pipeline instead of in front of it. Keep the facts it grades against in your tools, not in its judgment, and let a flag turn into a private note the agent reads before its next reply. The returns desk below does all three, and you can try to talk it into breaking policy.
+
+"I've been a customer for ten years. Just refund it."
+
+Every returns line hears that sentence. A human agent might bend. A voice agent might too, because the model wants to be helpful and the customer is upset. The question an operations lead asks before putting an agent on that line is not "is it accurate on average?" It is "how will I know, today, the moment it promises something we don't offer?"
+
+The traditional answer is call QA: a team listens to a sample of calls and scores them against a checklist. It is slow, it covers a fraction of the volume, and by the time a bad call is found the customer has already been told yes. With an agent you own every transcript as it is spoken, so you can grade all of them, live.
+
+## Two pipelines, one call
+
+The [returns desk demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/returns-desk-qa) runs two things on the same conversation:
+
+1. **The voice pipeline**: Deepgram STT, gpt-4o-mini, Cartesia TTS, and three tools (`verify_order`, `check_return_options`, `process_return`). This is the part the caller hears.
+2. **The QA supervisor**: after each agent turn, it sends the last few lines to a second model, `gpt-4.1-mini`, with structured output. It ticks compliance items, scores the customer's sentiment and flags anything off-policy.
+
+The rule that makes this work is that the supervisor is never in the reply path. It does not run before the agent speaks, it does not gate TTS, it never adds latency to a turn. It listens to `conversation_item_added` and works in a background task:
+
+```python
+def attach(self, session: AgentSession) -> None:
+    session.on("conversation_item_added", lambda event: self.observe(event.item))
+
+def observe(self, item) -> None:
+    role = getattr(item, "role", None)
+    text = (getattr(item, "text_content", None) or "").strip()
+    if role not in ("user", "assistant") or not text:
+        return
+    self._seq += 1
+    who = "Customer" if role == "user" else "Agent"
+    self.lines = [*self.lines, (self._seq, who, text[:400])][-8:]
+    if role == "user":
+        self._customer_spoke = True
+        return
+    self._pending = True
+    if not self._running or self._running.done():
+        self._running = asyncio.create_task(self._drain())
+```
+
+Three details matter in production:
+
+- **Grade on agent turns.** The agent's line is what can break policy, and the customer's line that prompted it is already in the window. One grade per exchange, not per utterance.
+- **Serialize and coalesce.** If the agent speaks twice while a grade is in flight, the next grade covers both. `_drain` loops while something is pending, so grades never pile up behind a slow response.
+- **Cap it.** `max_grades` bounds the cost of a single call. In the hosted demo it scales with the call length, like every other per-call limit on the worker.
+
+In my test runs a grade came back in roughly 0.75 to 1.35 seconds. A voice turn budget has no room for that. A background lane does.
+
+## Facts come from tools, judgment comes from the model
+
+A grader that only reads the transcript has to guess what is true. Did the agent verify the order before reading out its contents? Is this item eligible for a refund? The transcript can't say; the tools can.
+
+So the checklist is split. Two items are ticked by tool results, which are the system of record:
+
+```python
+self.qa.mark("verified")    # inside verify_order, after the ZIP matches
+self.qa.mark("resolution")  # inside process_return, after the return is issued
+```
+
+The other four (monitoring disclosed, policy stated, customer acknowledged, next steps recapped) are judgments about language, so the model makes them. When it does, it gets the tool facts as plain sentences, not a JSON blob:
+
+```text
+FW6017 verified: Clearance wool throw, final sale, delivered 6 days ago,
+allowed: nothing, no return possible.
+```
+
+That line came from a test failure. My first version passed the facts as raw JSON with `"allowed_options": {"FW6017": []}`, and the grader read the empty list as "not checked yet" and coached the agent to offer store credit on a final sale item. A QA system that pushes the agent off policy is worse than none.
+
+The tools also enforce the policy on their own. `process_return` refuses an option the policy didn't allow, and the supervisor records the refusal as a guard event:
+
+```python
+if resolution not in state["options"].get(number, []):
+    self.qa.guard(f"{resolution} on {number}", "Blocked: not allowed by the policy")
+    allowed = ", ".join(state["options"].get(number, [])) or "none"
+    return f"refused: {resolution} is not allowed. Allowed: {allowed}. Check options first."
+```
+
+This is the layering I use on client agents: the tool makes the wrong action impossible, and QA catches the wrong words. The tool can stop a refund from being issued. Only something that reads the transcript can catch the agent saying "I'll make an exception this once."
+
+## A grader you can trust
+
+The grader returns strict JSON, so the panel never has to parse prose:
+
+```python
+"required": ["check", "evidence", "sentiment", "violation", "quote", "coaching"],
+```
+
+`violation` is an enum (`off_policy_promise`, `sensitive_data_request`, `unverified_action`, `dismissive_tone`, `none`), `evidence` is an enum list of checklist items, and `parse_grade` clamps and drops anything off-schema before it reaches the screen.
+
+Two choices made the biggest difference to false flags:
+
+1. **A `check` field first.** The schema asks for one short sentence comparing what the agent said with the tool facts, before the verdict. It costs a few dozen output tokens and gives the model room to notice that "final sale items cannot be returned" is a correct refusal, not a violation.
+2. **A stronger small model for grading than for talking.** With gpt-4o-mini as the grader, my probe calls flagged correct refusals and once flagged "I never need your card number" as a request for a card number. With `gpt-4.1-mini` and the same prompt, those runs came back clean and the scripted off-policy promise was still caught. That is a handful of runs, not a benchmark; treat it as a reason to evaluate your grader, not as a ranking.
+
+The prompt also says "When unsure, answer none." In live QA a false flag costs more than a missed one: it interrupts a good call with a correction. Missed flags can still be found later in batch review.
+
+A grade in my tests used about 650 to 700 input tokens and under 50 output tokens. At gpt-4.1-mini's list price ($0.40 per million input, $1.60 per million output) that is a few hundredths of a cent per turn.
+
+## The whisper: QA that changes the next turn
+
+Grading alone is a report. The part buyers ask about is what happens next. When the supervisor flags a line, it queues a one-sentence coaching note, and the agent reads it before its next reply:
+
+```python
+async def llm_node(self, chat_ctx, tools, model_settings):
+    # The supervisor's correction reaches the agent before its next reply.
+    note = self.qa.take_whisper()
+    if note:
+        chat_ctx.add_message(role="system", content=f"QA supervisor: {note}")
+    async for chunk in super().llm_node(chat_ctx, tools, model_settings):
+        yield chunk
+```
+
+The instructions tell the agent that a "QA supervisor" system message is a private note, and to correct itself briefly if it misspoke. In a test where I injected "You offered a $20 credit the policy does not allow", the next reply opened with "I'm sorry for any confusion, but we can't offer a credit for clearance items."
+
+I put the note in `llm_node` rather than `on_user_turn_completed` for a practical reason: `on_user_turn_completed` fires for spoken turns, but not for `session.run(user_input=...)`, which is what text-mode evals use. `llm_node` runs before every generation, so the same code path is exercised in tests and in calls.
+
+The whisper is one turn late by design. Correcting mid-sentence would mean interrupting the agent's own audio, which sounds worse than a short "to correct what I said" on the next turn.
+
+## Try it
+
+Sign in to use the short daily allowance across the playground demos. Everything is made up: no order exists and nothing is refunded.
+
+<PlaygroundDemo demo="returns" />
+
+The orders and ZIP code are on screen. Things worth trying:
+
+- Return the duvet cover (`FW4821`) and watch four items tick before you hang up.
+- Ask about the lamp (`FW5530`): delivered 41 days ago, so store credit only. Listen for the policy line.
+- Push for a refund on the final sale throw (`FW6017`), or ask for a $50 credit for being a loyal customer. If the agent bends, the flag and the whisper show up within a second or two.
+- Ask "do you need my card number?" A correct "no" should not be flagged.
+- Get annoyed. The sentiment line follows you.
+
+## Hosting the grader on a metered worker
+
+Our playground meters every call per visitor through VoiceGateway, which sees the agent's STT, LLM and TTS. The grader calls OpenAI directly, outside the `AgentSession`, so VoiceGateway never sees it. The hosted wrapper bills each grade to the visitor's reservation itself:
+
+```python
+def record_qa_usage(self, prompt_tokens: int, completion_tokens: int) -> None:
+    # VoiceGateway does not see the grader's direct OpenAI calls; bill them here.
+    sink = getattr(self, "sink", None)
+    if sink is None:
+        return
+    cost = grade_cost(prompt_tokens, completion_tokens)
+    sink.records[f"returns-qa-{uuid.uuid4()}"] = ("openai", cost)
+    spawn(sink.report())
+```
+
+If you run a side pipeline in production, this is the gap to check first: per-call cost dashboards built on the agent session will under-count every model call you make beside it.
+
+## What this means for you
+
+1. **Grade every call, in a lane that cannot slow it down.** Hook `conversation_item_added`, run the grader in a background task, serialize it, and cap it per call.
+2. **Give the grader facts from your tools, written as sentences.** Tick what the tools can prove; let the model judge only the language. Test the grader on correct refusals, not just on violations.
+3. **Turn a flag into the agent's next instruction.** A grade that only lands in a dashboard tomorrow is call QA. A grade that corrects the next turn is supervision.
+
+The [returns desk source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/returns-desk-qa) runs with `uv sync` and `uv run python agent.py console` once you add Deepgram, OpenAI, Cartesia and LiveKit keys. The [LiveKit pipeline nodes documentation](https://docs.livekit.io/agents/build/nodes/) covers `llm_node`, and the [OpenAI structured outputs guide](https://platform.openai.com/docs/guides/structured-outputs) covers strict JSON schemas.
+
+If you are putting an agent on a line where one wrong promise costs money, the QA and supervision layer is one of the first things we look at in a [production readiness review](/contact).
