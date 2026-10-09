@@ -1,0 +1,13 @@
+1/ A customer wants $649 back. Your voice agent can refund $150. It can say no, say yes and break policy, or cold-transfer and make them repeat everything. All three are wrong. Here is the fourth option, live in our playground.
+
+2/ Most escalations are not transfers. A human adds one bit: approved or not. So keep the caller with the agent and ask the manager for the bit, over LiveKit RPC from a console in the same room.
+
+3/ The whisper brief is built from tool state, not generated: price and delivery date from the order lookup, the over-limit math, and a recommendation from written policy. Readable in five seconds.
+
+4/ The hold never goes silent. Scripted check-ins at 12s and 28s, skipped if the caller is talking. At 45s with no answer, the written policy decides. An approval flow without a timeout is an outage.
+
+5/ The decision goes into the chat context as a system message, and the refund tool checks the recorded approval. The model saying "approved" changes nothing. Authority lives in the tool, not the prompt.
+
+6/ If the manager wants the conversation, it is a warm transfer: brief plus last 8 turns. In production that is LiveKit's WarmTransferTask over SIP; the brief is its extra_instructions.
+
+7/ Try it as both caller and manager, and read the code: https://mahimai.ca/blog/voice-agent-human-approval-warm-transfer

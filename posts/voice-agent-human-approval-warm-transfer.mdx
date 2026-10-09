@@ -1,0 +1,220 @@
+---
+title: 'Human-in-the-Loop Voice Agents: Approve, Hold, Transfer'
+description: 'A voice agent that asks a manager mid-call: a whisper brief over LiveKit RPC, a hold that never goes silent, and a warm transfer that carries the case.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'human-in-the-loop', 'rpc', 'warm-transfer']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** Most escalations are not transfers. They are a yes or no from someone with more authority. Send that person a short brief built from tool state, ask over LiveKit RPC, keep the caller company while they decide, and fall back to written policy if nobody answers. Only when the manager wants the conversation do you transfer, and then the brief goes with the call. Below is a live demo where you are both the caller and the manager.
+
+A customer calls about a $649 espresso machine. The steam wand snapped off on day 41. The return window is 30 days, and the returns agent can refund up to $150 on its own.
+
+A voice agent has three bad options here. It can say no and lose the customer. It can say yes and blow through policy, because a model talked itself into it. Or it can say "let me transfer you", drop the caller into a queue, and make them explain the espresso machine again to a person who has none of the context.
+
+A human returns clerk does something else. They put a hand over the receiver, lean over to the manager, say one sentence, get a nod, and come back: "Good news, she approved it." The caller waits twenty seconds and never repeats themselves. That is the pattern this post builds, from the [manager approval demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/manager-approval) in awesome-voice-apps.
+
+## Approval is not a transfer
+
+Teams wire escalation as one thing: hand the call to a human. But look at what the human actually contributes in most escalations. A refund over a limit, a fee waiver, a credit above a threshold, a booking outside policy. The human adds one bit of information, approved or not, and maybe a counteroffer.
+
+Transferring the whole call for one bit is expensive twice. The human spends minutes re-hearing a story the agent already has, and the caller hears hold music and starts over. So split it:
+
+- **Approval**: the agent stays on the call, the human answers a structured question from a console, and the agent carries on.
+- **Transfer**: the human takes the conversation, because the decision needs judgement the brief cannot carry.
+
+The demo supports both. The manager can approve, counter with store credit, decline, or take the call. Three of those four never put a human on the line.
+
+## The whisper brief: built from state, not generated
+
+In a call center, a whisper is what the supervisor hears before they pick up: a few seconds of context only they can hear. Ours is text on a console, and it is the most important thing in the design, because a manager decides in the time it takes to read it.
+
+The brief is not written by the model. It is assembled from what the tools already verified:
+
+```python
+def whisper(case: dict, request: dict) -> dict:
+    """The brief the manager reads before deciding: one line, then the facts."""
+    order = case["order"]
+    days = order["days_since_delivery"]
+    late = days - RETURN_WINDOW_DAYS
+    to = "the card" if request["to"] == "card" else "store credit"
+    advice = policy_decision(request)["verdict"]
+    line = (
+        f"{order['customer']}, {order['item']}, {money(order['price'])}, day {days}. "
+        f"{request['detail']}. Wants {money(request['amount'])} to {to}. "
+        f"I'd {advice.replace('_', ' ')}."
+    )
+    rows = [
+        {"label": "Ask", "value": f"{money(request['amount'])} to {to}"},
+        {"label": "Over my limit",
+         "value": f"{money(request['amount'])} vs {money(AGENT_LIMIT)}, {late} days past the window"},
+        {"label": "Recommend", "value": advice.replace("_", " ")},
+        # ... customer, item and reason rows
+    ]
+    return {"line": line[:280], "rows": rows}
+```
+
+Three reasons to keep the model out of it:
+
+1. **Every fact in the brief came from a tool.** The price and the delivery date come from the order lookup, not from what the caller said. A manager approving $649 should not be approving a number the model heard.
+2. **It costs no extra model turn.** The agent is already mid-conversation; a summarisation call adds latency and spend for text a template writes better.
+3. **It carries a recommendation.** "I'd approve" is what the written policy says. The manager can overrule it, but they start from the policy, not from a blank page.
+
+The only free text is `detail`, a few of the caller's own words that the model passes to the tool, capped at 90 characters.
+
+## Asking over RPC
+
+The manager's console is a participant in the LiveKit room, so the request is a [LiveKit RPC](https://docs.livekit.io/transport/data/rpc/) call. No webhook, no polling, no second channel to secure.
+
+```python
+reply = await self.room.local_participant.perform_rpc(
+    destination_identity=identity,
+    method="approval.request",
+    payload=json.dumps({"id": request["id"], "amount": request["amount"],
+                        "to": request["to"], "brief": request["brief"],
+                        "timeout": HOLD_TIMEOUT}),
+    response_timeout=RPC_TIMEOUT,  # 4 seconds
+)
+```
+
+Note what the reply means: "received", not "approved". The console acknowledges at once and the decision comes later, as a call in the other direction. An RPC that waits forty seconds for a human is an RPC that times out.
+
+The decision handler is where the security lives. A console that can approve refunds is a privileged input, so the agent checks who is calling, that the request id is the open one, and that nothing was decided yet:
+
+```python
+async def _console_decided(self, data: rtc.RpcInvocationData) -> str:
+    case = self.case
+    if data.caller_identity != self._console():
+        raise rtc.RpcError(REJECTED, "Not the manager console")
+    body = json.loads(data.payload)
+    request = case["request"]
+    if not request or request["id"] != body["id"] or case["decision"]:
+        raise rtc.RpcError(REJECTED, "No open request with that id")
+    if body["verdict"] not in VERDICTS:
+        raise rtc.RpcError(REJECTED, "Unknown verdict")
+    self._spawn(self._decide("you", body["verdict"], body.get("note", "")))
+    return json.dumps({"ok": True})
+```
+
+A replayed approval, an approval for a different request, or a second click all bounce. In production the console is a separate app with its own auth, but the agent-side checks stay the same: never let a decision arrive from someone the agent did not ask.
+
+## A hold that never goes silent
+
+The `ask_manager` tool returns immediately, so the model can say "I'm checking with my manager, I'll stay right here with you." Then a background task owns the hold:
+
+```python
+CHECK_INS = (
+    (12, "Still here with you. My manager has your case open now."),
+    (28, "Thanks for holding. I flagged it as a defect, which usually helps."),
+)
+HOLD_TIMEOUT = 45
+
+async def _hold(self, request_id: str) -> None:
+    case, waited = self.case, 0.0
+    for at, line in CHECK_INS:
+        await asyncio.sleep(at - waited)
+        waited = at
+        if case["decision"]:
+            return
+        # Never talk over the caller or over an answer already under way.
+        if self.session.agent_state in ("listening", "idle") and self.session.user_state != "speaking":
+            self.session.say(line)
+    await asyncio.sleep(HOLD_TIMEOUT - waited)
+    if not case["decision"]:
+        await self._decide("policy", **policy_decision(case["request"]))
+```
+
+Four choices in there are worth copying:
+
+- **Check-ins are scripted, not generated.** They cost no model turn and can never promise an outcome.
+- **They yield the floor.** If the caller is talking, or the model is already answering a question, the check-in is skipped. The caller can keep chatting on hold; the agent still answers questions about the order.
+- **The hold has an end.** If no human answers in 45 seconds, the store's written policy decides and the call says so. An approval flow without a timeout is an outage waiting for a manager's lunch break.
+- **The fallback is the same policy the brief recommended.** The manager is an override on the policy, never the only path through it.
+
+## Resuming on the decision
+
+When the decision lands, the agent has to act on it now, and remember it later. So it goes into the chat context as a system message, and then the agent generates the next turn:
+
+```python
+chat_ctx = self.chat_ctx.copy()
+chat_ctx.add_message(role="system", content="Manager decision: APPROVED $649.00 to card.")
+await self.update_chat_ctx(chat_ctx)
+self.session.generate_reply(
+    instructions="Tell the caller it is approved, then call issue_refund for that amount."
+)
+```
+
+`generate_reply(instructions=...)` alone is not enough: those instructions apply to one turn. If the caller asks two turns later "so it's going back on my card?", the model needs the decision in its history. If a scripted check-in is playing when the decision arrives, the agent interrupts it first, so good news never waits behind "thanks for holding".
+
+The approval itself is recorded in state, and that is what the refund tool checks. The model saying "approved" changes nothing.
+
+## Authority lives in the tool
+
+Here is the whole permission model, and it is not in the prompt:
+
+```python
+def refund(case, amount, to, authority):
+    if case["refund"]:
+        raise ToolError("Refund already issued. Do not issue another.")
+    if not 0 < amount <= ORDER["price"]:
+        raise ToolError("The amount must be between $0 and the order price.")
+    if authority == "manager":
+        allowed = amount <= MANAGER_LIMIT
+    else:
+        approved = case["approved"]
+        allowed = within_own_limit(amount) or bool(
+            approved and amount <= approved["amount"] and to == approved["to"]
+        )
+    if not allowed:
+        raise ToolError("Over your limit and not approved. Call ask_manager instead.")
+```
+
+A counteroffer of store credit approves store credit, so a model that tries to send it to the card gets refused. The agent's own limit is $150 inside 30 days; the manager's is $1,000. A prompt injection that convinces the model it is the manager does not change which tool it holds.
+
+## The warm transfer
+
+Sometimes the manager wants the conversation: an angry customer, a pattern of returns, a judgement call. In the demo the manager taps "Take the call". The agent says one scripted line, then hands the session to a manager agent with a different voice:
+
+```python
+await self.session.say(
+    "Good news, Dana wants to talk to you herself. I've told her everything, "
+    "so you won't need to repeat it. Connecting you now.",
+    allow_interruptions=False,
+)
+self.session.update_agent(self._transfer(case))
+```
+
+The manager agent is built with the brief in its instructions and the last eight turns of the conversation, with tool calls dropped. Its opening instruction is to prove it in one breath: name the item, what broke and how long they have had it, then say what she can do. No "can I get your order number". The panel shows what travelled: brief, order, decision so far, transcript.
+
+In the demo the manager is a second voice, because a playground call is one visitor. In production the manager is a person, and LiveKit ships the plumbing as [`WarmTransferTask`](https://docs.livekit.io/agents/prebuilt/tasks/warm-transfer/): it dials the human over SIP into a separate consult room, plays hold music to the caller, gives a transfer agent the conversation history to brief the human, and merges the calls when the human connects. The brief from this post is exactly what you pass as its `extra_instructions`, alongside the `chat_ctx`. The approval handshake does not change at all.
+
+## Try it: you are the caller and the manager
+
+Ask Sky for your money back on the espresso machine. When the brief lands on your console, read it, then approve, counter, decline, or take the call. Or do nothing for 45 seconds and watch the policy decide.
+
+<PlaygroundDemo demo="approval" />
+
+Things to try:
+
+- Keep talking while you are on hold. Ask about the warranty. The check-ins wait for you.
+- Pick "Store credit", then tell Sky you want it on your card. It cannot, and it offers the manager.
+- Pick "Take the call" and listen for whether the manager asks you anything you already said.
+
+## Testing it without a call
+
+Everything above runs offline. The pure parts (policy, brief, refund authority) are plain unit tests. The handshake tests mock `perform_rpc` and check that a spoofed caller, a stale request id and a second decision are all refused. The hold tests patch `asyncio.sleep` and assert that check-ins happen, that they never talk over a speaking caller, and that the timeout lands on policy.
+
+The flow tests run a real `AgentSession` in text mode with a scripted LLM: look up the order, ask the manager, approve over RPC, and assert the refund was issued by the agent; then the same with "take the call", and assert the session's current agent is the manager and its instructions contain the brief. No provider keys, no room, about a second.
+
+## What this means for you
+
+1. **Separate approval from transfer.** Most escalations need one bit from a human. Ask for it from a console and keep the caller with the agent.
+2. **Build the brief from tool state, with a recommendation.** Every fact verified, nothing generated, readable in five seconds. The same brief becomes the context for a real transfer.
+3. **Put the timeout and the limits in code.** A hold ends on written policy, a decision is recorded in state, and the refund tool, not the prompt, decides who may pay out what.
+
+The [manager approval source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/manager-approval) runs with `uv sync` and `uv run python agent.py dev` once you add LiveKit, OpenAI, Deepgram and Cartesia keys; its README has the RPC contract for your own console. Without a console in the room, every request goes to the policy manager, so it also works from the LiveKit playground.
+
+If your agents escalate by transferring and your humans spend the first minute of every transfer re-asking the question, that is one of the first things we look at in a [production readiness review](/contact).
