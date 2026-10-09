@@ -1,0 +1,193 @@
+---
+title: 'Private Voice Agent: Self-Hosted STT, LLM and TTS'
+description: 'A hospital voice agent where Whisper, Qwen3 and Kokoro run on one GPU server you control. Count every byte, prove zero reach AI providers, and see the cost.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['voice-agents', 'self-hosted', 'healthcare', 'data-residency', 'livekit', 'vllm']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** When a hospital or public agency asks "where does the patient's voice go?", a cloud region dropdown is a weak answer. You can run the whole speech loop (faster-whisper for speech to text, Qwen3 on vLLM for the model, Kokoro for the voice) on one GPU server behind a single OpenAI-compatible endpoint, point LiveKit's OpenAI plugin at it, and wrap every client in a transport that counts bytes by host. The panel below shows the count live: zero bytes to AI providers. It costs you some latency, a fixed GPU bill and an operations job. Here is the code and the tradeoff.
+
+"Before we go further: where does the audio go, who can read the transcript, and is any of it stored outside Canada?"
+
+That question ends a lot of voice agent pilots in Canadian healthcare and government. The demo answers it with a cloud API key and a region setting. The procurement team then asks about the speech vendor's subprocessors, the LLM provider's retention policy, and the TTS company's logging, and the pilot stalls for a quarter.
+
+The rules behind the question are real. In Nova Scotia, the [Personal Information International Disclosure Protection Act](https://novascotia.ca/just/iap/piidpaquest.asp) requires public bodies to keep personal information stored and accessed only in Canada, with narrow exceptions. Quebec's Law 25 allows transfers out of the province but requires a [privacy impact assessment](https://cloud.google.com/security/compliance/quebeclaw25) first. Neither is legal advice for your case, but both explain why "it is in a US region of a vendor you have a DPA with" does not close the conversation.
+
+There is a cleaner answer: the models run on a server you control, and you can show that nothing else is called. This post walks through the [private health line demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/private-health-line) in awesome-voice-apps, which does exactly that for a fictional hospital's post-surgery check-in line.
+
+## Why a residency checkbox is not enough
+
+A cloud voice agent is a cascade of three vendors, and each one sees the call:
+
+| Stage | What the vendor receives | What you have to verify |
+|---|---|---|
+| Speech to text | Raw caller audio | Region, retention, whether audio trains models, subprocessors |
+| Language model | Full transcript plus your prompt and tool results | Same, plus prompt logging and abuse monitoring retention |
+| Voice | Every sentence the agent says, often with patient details | Same |
+
+Each row is a contract, a questionnaire and a renewal. Self-hosting does not remove the compliance work, but it collapses three third parties into one server that sits inside your existing controls (your network, your encryption, your logging, your Canadian data centre).
+
+The opinionated take: for regulated buyers, a self-hosted cascade is not the exotic option anymore. Open models for each stage are good enough for structured calls like intake, check-ins and reminders. Where they are not yet good enough is open-ended conversation at cloud-level latency, and that is the tradeoff to price honestly.
+
+## The stack: three open models, one endpoint
+
+| Stage | Model | Server | Why |
+|---|---|---|---|
+| Speech to text | [faster-whisper large-v3 turbo](https://huggingface.co/deepdml/faster-whisper-large-v3-turbo-ct2) | [speaches](https://speaches.ai) | Strong English accuracy, CTranslate2 speed |
+| Language model | [Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) | [vLLM](https://docs.vllm.ai/en/latest/features/tool_calling.html) | Small, fast, reliable tool calls, no thinking mode to disable |
+| Voice | [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) | speaches | 82M parameters, Apache 2.0, natural English voices |
+| Voice activity | Silero VAD | the agent worker, CPU | Cuts each utterance before Whisper sees it |
+
+All three fit comfortably on a single 24 GB GPU. speaches serves both Whisper and Kokoro behind OpenAI's `/v1/audio/transcriptions` and `/v1/audio/speech` routes; vLLM serves `/v1/chat/completions`. A Caddy reverse proxy in front gives you one HTTPS endpoint and one bearer key for all three:
+
+```yaml
+services:
+  speech:
+    image: ghcr.io/speaches-ai/speaches:latest-cuda
+    environment:
+      API_KEY: ${ONPREM_API_KEY:?set ONPREM_API_KEY}
+      PRELOAD_MODELS: '["deepdml/faster-whisper-large-v3-turbo-ct2","speaches-ai/Kokoro-82M-v1.0-ONNX"]'
+      # Keep both models in GPU memory: a cold load would land on a caller's first turn.
+      STT_MODEL_TTL: -1
+      TTS_MODEL_TTL: -1
+
+  llm:
+    image: vllm/vllm-openai:v0.10.2
+    command:
+      - --model=Qwen/Qwen3-4B-Instruct-2507
+      - --api-key=${ONPREM_API_KEY:?set ONPREM_API_KEY}
+      - --enable-auto-tool-choice
+      - --tool-call-parser=hermes
+      - --max-model-len=8192
+      # Leave room on the card for Whisper and Kokoro.
+      - --gpu-memory-utilization=0.55
+```
+
+```
+{$ONPREM_DOMAIN} {
+	handle /v1/audio/* {
+		reverse_proxy speech:8000
+	}
+	handle /v1/chat/* {
+		reverse_proxy llm:8000
+	}
+	handle {
+		respond 404
+	}
+}
+```
+
+The full `compose.yaml` and `Caddyfile` are in the demo folder. `docker compose up -d` on a GPU machine with the NVIDIA container toolkit is the whole install.
+
+Two settings matter more than they look. `STT_MODEL_TTL: -1` keeps the models loaded; the default unloads them after five idle minutes, and the next caller pays the load time on their first sentence. And `--tool-call-parser=hermes` is what turns Qwen3's `<tool_call>` output into OpenAI-style tool calls; without it, the agent's tools never fire.
+
+## Pointing LiveKit at your own server
+
+LiveKit Agents' OpenAI plugin speaks to any OpenAI-compatible server, and its TTS client explicitly handles servers that return raw audio instead of OpenAI's SSE stream. So the agent needs no custom STT, LLM or TTS class, only clients with your base URL:
+
+```python
+stack = {
+    # Whisper is not a streaming model: VAD cuts each utterance and sends one WAV clip.
+    "stt": openai.STT(
+        model=host.stt_model, language="en", use_realtime=False, client=client("stt")
+    ),
+    "llm": openai.LLM(
+        model=host.llm_model,
+        client=client("llm"),
+        max_completion_tokens=180,
+        temperature=0.3,
+        parallel_tool_calls=False,
+    ),
+    # Raw 24 kHz PCM: no decoder in the loop, and Kokoro speaks at 24 kHz.
+    "tts": openai.TTS(
+        model=host.tts_model,
+        voice=host.tts_voice,
+        response_format="pcm",
+        client=client("tts"),
+    ),
+}
+```
+
+`use_realtime=False` keeps the plugin on the plain transcription endpoint instead of OpenAI's realtime websocket protocol. With it off, `AgentSession` wraps the STT in a stream adapter that uses Silero VAD to cut each utterance and posts one WAV clip per turn. `response_format="pcm"` skips MP3 encoding on the server and decoding on the worker; at 24 kHz it is also Kokoro's native rate.
+
+The base URL has to be HTTPS unless it is localhost; the agent refuses to start otherwise. The patient's audio crosses the network to your model server, and that hop should be encrypted even inside your own network.
+
+## Proving it: count every byte, by host
+
+"We self-host" is a claim. A number on screen is evidence. Every OpenAI client in the demo gets its own `httpx` transport that counts request and response bodies by destination host:
+
+```python
+class CountingTransport(httpx.AsyncBaseTransport):
+    """Count every request and response body one model client moves, by host."""
+
+    def __init__(self, ledger: EgressLedger, stage: str, inner=None) -> None:
+        self._ledger = ledger
+        self._stage = stage
+        self._inner = inner or httpx.AsyncHTTPTransport(retries=0)
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        # Model requests (a WAV clip, a chat history, a sentence) are small and buffered.
+        body = await request.aread()
+        host = request.url.host
+        self._ledger.add(self._stage, host, sent=max(1, len(body)))
+        response = await self._inner.handle_async_request(request)
+        response.stream = _CountedStream(
+            response.stream, lambda n: self._ledger.add(self._stage, host, received=n)
+        )
+        return response
+```
+
+The ledger keeps sent and received bytes per stage, and a separate `elsewhere` counter for any host that is not your model server. That counter is the one the panel puts at the top. In a correct deployment it never moves; if someone later swaps a client for a cloud default, it does, on screen, in the first call.
+
+Per-turn latency comes from the plugins' own metrics: the STT request duration, the LLM's time to first token, and the TTS time to first audio. The agent subscribes to each client's `metrics_collected` event and keeps the last six turns.
+
+Both go to the browser as one `PrivateLine` snapshot on the LiveKit data channel, at most four times a second, because TTS audio arrives in many small chunks and each chunk moves the counter.
+
+## Try it
+
+Sign in to use the short daily allowance across the playground demos. Use made-up details: it is a simulation, it gives no medical advice, and nothing is saved.
+
+<PlaygroundDemo demo="onprem" />
+
+Things worth trying:
+
+- Say your pain is an eight. The tool records `8/10`, flags it, and tells the model not to reassure you.
+- Describe the wound as "clean, but a bit red". The validator picks the warning word over the reassuring one.
+- Give your temperature as "thirty-eight point four". Anything at 38 C or above is a flag.
+- Ask "where does my voice go?" The agent answers from its instructions; the panel answers from the ledger.
+- Watch the model server's byte counts. Speech to text sends the most (your audio, as WAV), voice receives the most (its audio, as PCM), and the language model moves a few kilobytes of text.
+
+The panel is also honest about the hops it does not control. In this playground the audio travels over LiveKit Cloud and our agent worker runs in a US region, so the demo proves the model side, not end-to-end residency. The next section is what a hospital deployment looks like.
+
+## What a hospital deployment looks like
+
+For an end-to-end residency claim, every hop that touches audio or text runs in the same Canadian region, inside the customer's network:
+
+1. **LiveKit server, self-hosted.** It is open source; [self-hosting](https://docs.livekit.io/home/self-hosting/deployment/) moves the media relay into your region. For phone calls, add LiveKit SIP and a Canadian SIP trunk.
+2. **The agent worker**, beside it. It runs VAD, turn-taking and tools, and calls nothing but the model server.
+3. **The model server**, the same `compose.yaml` on a GPU host in a Canadian data centre or on-premises.
+4. **Egress rules** that make the ledger redundant: the worker's network policy allows LiveKit and the model server and nothing else. The counter shows it working; the firewall makes it true.
+
+Recording, transcripts and the check-in result then land in systems the hospital already governs. Nothing in the agent needs to change between the playground and this layout; only the URLs do.
+
+## What private costs
+
+**Latency.** Whisper is not a streaming model. A cloud STT like Deepgram streams words while you talk and finalises shortly after you stop; Whisper starts only after VAD decides you stopped, then transcribes the whole clip. The panel shows our measured per-turn numbers next to the cloud stack's typical figures from our [latency calculator](/tools/latency-calculator). Expect the STT gap to be the largest. If it matters for your use case, the fix is a streaming open model (NVIDIA Parakeet or a streaming Whisper variant), not a bigger GPU.
+
+**Money.** The cloud stack bills per minute and per token. A self-hosted stack bills per hour whether anyone calls. Per-call cost is your GPU's hourly price divided by the calls it carries in that hour: our playground bills each call as the seconds it holds the GPU, at the server's hourly rate, under its own `gpu` cost line. At low volume the cloud is cheaper; with enough concurrent calls on one card, self-hosting wins. Work out your own crossover with your real call volume before choosing on price.
+
+**Operations.** You now run model servers: GPU drivers, image updates, model upgrades, monitoring, capacity. That is the real cost for most teams, and the reason this is a fit for organisations where residency is a requirement, not a preference.
+
+## What this means for you
+
+- **If you sell voice agents to Canadian healthcare or government**, have a self-hosted answer ready before procurement asks. A demo with a zero on screen is worth more than a slide of vendor DPAs.
+- **Start with structured calls.** Check-ins, intake, reminders and triage forms are where a 4B model with validated tools is good enough today. Keep open-ended conversation on a larger model or wait for faster open stacks.
+- **Measure, then decide.** Run the same script against your cloud stack and your self-hosted one, compare the per-stage times, and price the GPU against your real volume.
+
+If you are weighing a self-hosted voice stack for a regulated deployment, the architecture, the hops and the latency budget are what we work through in a [production readiness review](/contact).
+
+Sources: [speaches](https://speaches.ai), [vLLM tool calling](https://docs.vllm.ai/en/latest/features/tool_calling.html), [Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507), [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), [LiveKit self-hosting](https://docs.livekit.io/home/self-hosting/deployment/), [Nova Scotia PIIDPA FAQ](https://novascotia.ca/just/iap/piidpaquest.asp), [Quebec Law 25 overview](https://cloud.google.com/security/compliance/quebeclaw25).
