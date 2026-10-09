@@ -1,0 +1,190 @@
+---
+title: 'Replace Your IVR Phone Tree with Voice Intent Routing'
+description: 'Build a voice agent that routes callers by what they say: score every queue, ask one clarifying question when two fit, and race a press-1 menu.'
+pubDate: 2026-10-09
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'ivr', 'intent-routing', 'contact-center']
+draft: false
+---
+
+import PlaygroundDemo from '@/components/blog/PlaygroundDemo.astro';
+
+> **TL;DR:** Replacing a press-1 menu with "tell me what you need" works only if the agent knows when it is not sure. Score every queue on each caller turn, let code (not the model) decide to route or ask, cap clarifying questions at two, and make the transfer tool refuse any queue the router did not pick. One-token logprobs looked like the principled way to get those scores, and they told us a genuinely ambiguous call was 100% one queue. You can race the agent against a menu below.
+
+"For billing and payments, press 1." You wanted billing. You still have to hear that the menu options have changed.
+
+Every telecom, utility and bank in North America runs some version of this tree. It exists because routing is the one job the phone system had to do without understanding the caller. A voice agent can understand the caller, so the menu should go. The hard part is not the happy path. "I was charged twice" is easy. "My internet is down and the technician never showed up" is two departments, and an agent that picks one with confidence sends half those callers to the wrong queue, which is worse than the menu.
+
+This post walks through the [phone tree router demo](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/phone-tree-router) in awesome-voice-apps: a support line for Northvale, a fictional telecom, with six queues and a press-1 menu racing it on screen.
+
+## The model talks, the router decides
+
+The obvious build is a single LLM with a `transfer(department)` tool. It works in a demo and fails in a review, for three reasons: you cannot see why it chose a queue, you cannot tune when it should ask instead of guess, and nothing stops it from transferring on the first vague sentence.
+
+So the demo splits the job. A **router** scores every queue on each caller turn. A few lines of **policy** turn the scores into one of three actions. The **conversation model** only phrases what the policy decided.
+
+```python
+def decide(scores: dict[str, float], clarified: int) -> dict:
+    """Route, clarify, or keep listening. Pure policy: no model involved."""
+    ranked = sorted(DEPARTMENTS, key=lambda key: scores.get(key, 0.0), reverse=True)
+    top, second = ranked[0], ranked[1]
+    confidence = scores.get(top, 0.0)
+    if scores.get(UNCLEAR, 0.0) > confidence:
+        return {"action": "listen", "target": None, "between": None, "confidence": confidence}
+    if confidence >= ROUTE_AT:
+        return {"action": "route", "target": top, "between": None, "confidence": confidence}
+    if clarified >= MAX_CLARIFY:
+        # Two questions is the limit. A best guess beats a third question.
+        return {
+            "action": "route",
+            "target": top,
+            "between": None,
+            "confidence": confidence,
+            "forced": True,
+        }
+    between = [top, second] if scores.get(second, 0.0) >= RUNNER_UP_AT else [top]
+    return {"action": "clarify", "target": None, "between": between, "confidence": confidence}
+```
+
+`ROUTE_AT` is 0.75 and `MAX_CLARIFY` is 2. Those two numbers are the product decisions in this whole system, and they live in one function you can unit test without a network. When a contact center lead says "it asks too many questions", you change a constant and rerun the transcript suite. You do not rewrite a prompt and hope.
+
+Two details carry more weight than they look:
+
+- **An "unclear" queue.** A greeting, "can I talk to a person", or anything off-topic scores as unclear, and the agent asks what the call is about instead of guessing. Asking for a human without a reason is the most common opening on a support line, and it should not route anywhere yet.
+- **Confirm, don't offer a false choice.** If the runner-up is below 15%, the question confirms the top queue ("Is this about your mobile plan?") instead of inventing a second option.
+
+## Getting scores you can threshold
+
+This is where my first version was wrong, and the reason is worth knowing.
+
+The textbook approach is a one-token classifier: give each queue a letter, ask for one letter, request `logprobs`, and read the probabilities off the first token ([OpenAI's logprobs guide](https://cookbook.openai.com/examples/using_logprobs) describes this pattern for classification). It is cheap, fast, and sounds calibrated. Against gpt-4o-mini at temperature 0, here is what it returned for our test sentences:
+
+| Caller says | One-token logprobs | Split scores (shipped) |
+| --- | --- | --- |
+| I got charged twice this month | billing 100% | billing 100% |
+| My internet is down and the technician never showed up | internet 100% | internet 50%, visit 50% |
+| I'm moving next month and honestly I might just cancel | moving 100% | moving 50%, cancel 50% |
+| Why is my bill so high, I was roaming in Mexico | billing 100% | billing 70%, mobile 30% |
+| Hi | unclear 100% | unclear 100% |
+
+The logprobs were accurate on clear calls and useless on exactly the calls the threshold exists for. The token distribution is the model's certainty about which letter to emit, not about what the caller meant, and on a tuned chat model it is peaked almost everywhere. A threshold over numbers that are always 0 or 100 is a threshold that never fires.
+
+What shipped instead is one small call with a strict JSON schema: one integer per queue, adding to 100, with an instruction to split the chance when the words fit two queues.
+
+```python
+async def classify(self, conversation: str) -> dict[str, float]:
+    """Score every queue in one small structured-output call."""
+    result = await self.router_client().chat.completions.create(
+        model=ROUTER_MODEL,
+        messages=[
+            {"role": "system", "content": routing.router_prompt()},
+            {"role": "user", "content": conversation},
+        ],
+        max_tokens=80,
+        temperature=0,
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": "queue_scores",
+                "strict": True,
+                "schema": routing.ROUTER_SCHEMA,
+            },
+        },
+        store=False,
+    )
+    if result.usage:
+        self.meter_router(result.usage.prompt_tokens, result.usage.completion_tokens)
+    return routing.read_scores(json.loads(result.choices[0].message.content or "{}"))
+```
+
+[Structured outputs](https://platform.openai.com/docs/guides/structured-outputs) with `strict: true` mean the response always parses into the schema, and `read_scores` still normalises defensively (negative, missing or non-numeric values count as zero). Be honest about what these numbers are: verbalised scores, not calibrated probabilities. They are a routing signal. You set the threshold by running real transcripts through `decide` and counting misroutes against extra questions, not by trusting that "75" means 75%.
+
+The router sees the whole round, not just the last sentence, with one extra instruction: when the caller has answered the agent's question, their answer decides. Without that line, "I want to rebook the visit" after the clarifying question still scored 50/50, because the original two-department sentence dominated.
+
+In our runs the scoring call took about 350 to 600 ms after the first request warmed the connection, for roughly 300 input and 30 output tokens. At gpt-4o-mini's list price that is well under a hundredth of a cent per turn.
+
+## Run the router before the reply
+
+The router has to finish before the agent speaks, because what the agent says depends on it. LiveKit Agents has a hook for exactly this: [`on_user_turn_completed`](https://docs.livekit.io/agents/logic/nodes/) runs when the caller's turn ends and before the LLM generates a reply, and [messages added there apply to the current turn only](https://docs.livekit.io/agents/logic/chat-context/).
+
+```python
+async def on_user_turn_completed(self, turn_ctx: ChatContext, new_message: ChatMessage) -> None:
+    state = self.session.userdata
+    heard = (new_message.text_content or "").strip()
+    if not heard:
+        return
+    if state["routed"] is not None:
+        # A new request after a transfer: both clocks restart from when they spoke.
+        routing.new_round(state, self._speaking_since or time.time())
+    routing.hear(state, "caller", heard)
+    started = time.perf_counter()
+    try:
+        probs = await asyncio.wait_for(self.classify(routing.transcript(state)), ROUTER_TIMEOUT)
+    except Exception:  # noqa: BLE001 - a router outage must not drop the call
+        logger.warning("router unavailable this turn")
+        decision = routing.record_error(state, heard)
+    else:
+        ms = int((time.perf_counter() - started) * 1000)
+        decision = routing.record(state, heard, probs, ms)
+    publish_router(self.room, state)
+    turn_ctx.add_message(role="system", content=routing.instruction(decision))
+```
+
+The injected note is plain English: "Router: unsure between Internet support and Technician visits. Ask one short question that tells these two apart." Because it is turn-scoped, stale notes from earlier turns never pile up in the context. And because the router has a 2.5 second timeout with a fallback note ("ask the caller to say again what they need"), an outage at the classifier degrades to one extra question, not a dead call.
+
+## The transfer tool cannot pick the queue
+
+The model gets one tool, and it has no department argument:
+
+```python
+def transfer(state: dict, summary: str, now: float) -> str:
+    """Hand the call to the queue the router chose, never one the model names."""
+    decision = state["decision"]
+    if state["routed"] is not None:
+        return "Already transferred. Ask if there is anything else."
+    if not decision or decision["action"] != "route":
+        return "Not transferred: the router has not chosen a queue. Follow the router note."
+    target = decision["target"]
+    ...
+```
+
+If the model decides to be helpful and transfer during a clarifying turn, the tool refuses and tells it to follow the router. The only thing the model contributes is `summary`: one sentence in the caller's words that travels with the transfer. That is the other half of why callers hate phone trees. Even after the right keys, the human who picks up asks the same question again. A handoff note ("Technician missed Tuesday's install visit; caller wants to rebook it") fixes that for free, because the agent already heard it.
+
+## Racing the menu fairly
+
+The panel races the agent against Northvale's press-1 menu, and the menu gets every advantage. Its caller is perfect: they know the right branch, press each key the instant its option finishes, and never pick wrong. Prompts are read at 150 words a minute with short pauses, sentence by sentence, including the recording notice and the French-language option a Canadian line carries.
+
+```python
+def menu_path(department: str | None) -> dict:
+    """The fastest possible trip through the menu to a department.
+
+    The caller is perfect: they know the right branch, press each key the
+    moment its line finishes, and never pick wrong. Real callers are slower.
+    """
+```
+
+Even so, the perfect caller needs 22 to 32 seconds to reach a queue, and cancelling is slowest because it hides under "all other inquiries". The agent's clock starts at the same moment, when the call connects, and includes its own greeting, your speech, endpointing, the router and the reply. On a clear request it routes in single-digit seconds. With a clarifying question it can get close to the menu, and the panel says so when the menu wins. That is the honest version of the pitch: the agent's advantage is not that it is always faster, it is that real callers are not perfect, and it never sends them down the wrong branch.
+
+## Try it
+
+Sign in to use the short daily allowance across the playground demos. Nothing is real: no account is looked up and no one is transferred.
+
+<PlaygroundDemo demo="ivr" />
+
+Things worth trying:
+
+- "I was charged twice this month." Watch billing hit 100% and the transfer happen before the menu has finished its greeting.
+- "My internet is down and the technician never showed up." The router splits the score, and the agent asks one question that separates the two queues.
+- "Can I talk to a person?" The router scores it unclear and the agent asks what it is about.
+- After a transfer, ask for something else. Both clocks restart and the call log keeps each round.
+- Stay vague twice. On the third turn it routes to its best guess and the handoff note says so.
+
+## What this means for you
+
+1. **Separate scoring from deciding.** Put the route-or-ask policy in code with named thresholds, so you can tune it against transcripts instead of prompts.
+2. **Check that your confidence numbers move.** Run your hardest ambiguous utterances through your classifier. If it says 100% on all of them, your threshold is decoration.
+3. **Take the routing decision away from the conversation model.** Its tools should execute decisions, not make them, and a transfer should always carry a summary.
+
+The [phone tree router source](https://github.com/mahimairaja/awesome-voice-apps/tree/main/demos/phone-tree-router) runs with `uv sync` and `uv run python agent.py console` once you add LiveKit, Deepgram, OpenAI and Cartesia keys, and the routing policy and menu timings are unit tested with no keys at all.
+
+If you are replacing an IVR with a voice agent and need to decide what it routes, what it asks and what it hands off, that is exactly what we look at in a [production readiness review](/contact).
