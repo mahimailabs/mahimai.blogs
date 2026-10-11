@@ -1,0 +1,138 @@
+---
+title: 'A LiveKit Voice Agent That Runs With the Wi-Fi Off'
+description: 'STT, an LLM, TTS, turn detection and noise cancellation on one laptop CPU with LiveKit Agents: the plugins, what broke, and where the 3.4 seconds go.'
+pubDate: 2026-10-11
+author: 'Mahimai Raja J'
+tags: ['livekit', 'voice-agents', 'on-device', 'open-source', 'latency', 'testing']
+draft: false
+---
+
+import OfflineLoop from '@/components/blog/figures/local-livekit/OfflineLoop.astro';
+import PluginLayout from '@/components/blog/figures/local-livekit/PluginLayout.astro';
+import WhatBroke from '@/components/blog/figures/local-livekit/WhatBroke.astro';
+import TurnLatency from '@/components/blog/figures/local-livekit/TurnLatency.astro';
+import MicFreeTest from '@/components/blog/figures/local-livekit/MicFreeTest.astro';
+
+> **TL;DR:** A full LiveKit voice agent (noise cancellation, streaming STT, turn detection, an LLM and TTS) runs on one Mac mini CPU with the network off, in under 300M parameters. A turn takes about 3.4 s, and two thirds of that is text to speech, not the LLM. The hard part was not making it run but making it honestly offline: four failures threw no error, and two LiveKit defaults quietly reach for the cloud until you pin them.
+
+I turned the Wi-Fi off, said "What is the capital of France?", and about three and a half seconds later my laptop said "The capital of France is Paris." No API keys, no cloud calls, no GPU. Every model in the loop ran on a Mac mini's CPU, inside one LiveKit Agents process.
+
+<OfflineLoop />
+
+The whole thing is under 300M parameters: a 70M speech recognizer, a 135M language model and an 82M voice. That is small on purpose. This project proves the loop runs end to end on commodity hardware. It does not prove that a 135M model gives good answers, and I'll say so again when the numbers come up.
+
+The code is open: [github.com/mahimairaja/local-livekit](https://github.com/mahimairaja/local-livekit).
+
+## Why bother running it offline
+
+Every STT, LLM and TTS plugin in LiveKit Agents today calls a hosted API. That is the right default for most products, but it leaves people out. Hospitals and banks that cannot send audio to a third party. Factories and ships with no reliable network. Anyone who wants a demo that still works when the conference Wi-Fi dies, or a bill that stays at zero while they experiment. (If you are not sure your own hardware can carry it, the [local voice checker](/tools/local-voice) estimates that in the browser.)
+
+There is also a slower reason. Local plugins are being proposed upstream, and a pull request in a popular framework can wait one to two months for review. I wanted something people could run today, built exactly like the upstream plugins, so each piece can move into LiveKit on its own when it is ready.
+
+## The loop on one page
+
+A voice agent is five jobs in a row. Here is each one, the model doing it, and why I picked that model.
+
+1. **Noise cancellation: RNNoise.** A tiny recurrent network that cleans the mic signal before anything else hears it. The plugin comes from an open upstream PR, [livekit/agents#6477](https://github.com/livekit/agents/pull/6477) by Apoorva Verma.
+2. **Speech to text: a 70M streaming zipformer, via sherpa-onnx.** It decodes while you talk, so the agent sees words before you finish. ONNX only, no PyTorch.
+3. **End of turn: LiveKit's turn detector, v1-mini.** It already runs on the CPU ([why it beats a silence timer](/blog/voice-agent-end-of-turn-detection)). It only needed pinning so nothing reached for the cloud (more on that below).
+4. **The brain: SmolLM2-135M-Instruct, via a Hugging Face plugin.** I wrote that plugin for upstream in [livekit/agents#7731](https://github.com/livekit/agents/pull/7731). It loads any chat model from the Hub in process.
+5. **Text to speech: Kokoro v1.0, 82M, via sherpa-onnx.** The best open voice at its size, and it shares the sherpa-onnx dependency with the STT.
+
+Each job lives in its own package, laid out like `livekit/agents/livekit-plugins/*`, and one `main.py` wires them into an `AgentSession`. Models are pinned to exact Hugging Face commits and downloaded once. After that, you can unplug the router.
+
+<PluginLayout />
+
+## Writing an STT plugin LiveKit can trust
+
+A LiveKit STT plugin is a class that declares what it can do and then emits speech events. The declaration matters, because the session changes its behaviour based on it:
+
+```python
+stt.STTCapabilities(
+    streaming=True,           # take a live audio stream, no VAD chopping needed
+    interim_results=True,     # partial words feed preemptive generation
+    aligned_transcript="word",  # word timings tell the session when you stopped talking
+    offline_recognize=True,
+)
+```
+
+The stream then emits `START_OF_SPEECH`, a run of `INTERIM_TRANSCRIPT` events, one `FINAL_TRANSCRIPT` and `END_OF_SPEECH`. sherpa-onnx decides when an utterance ends, using its own endpoint detection, and the plugin translates that into events.
+
+One rule took a while to appreciate. The final transcript has to arrive **before** end of speech for the same utterance:
+
+```python
+# The final transcript must come before END_OF_SPEECH for the same utterance.
+if snap.text:
+    self._emit(stt.SpeechEventType.FINAL_TRANSCRIPT, snap)
+if self._speaking:
+    self._emit(stt.SpeechEventType.END_OF_SPEECH)
+```
+
+If they arrive the other way round, the session closes the turn without the words, and every later turn inherits the offset. Upstream has a bug report with exactly that symptom ([livekit/agents#7699](https://github.com/livekit/agents/issues/7699)). The model's blocking decode runs in `asyncio.to_thread`, so the event loop keeps serving audio while it thinks.
+
+Kokoro was simpler. It synthesizes a whole sentence at a time, so the plugin declares `streaming=False` and lets LiveKit's own `tts.StreamAdapter` split the LLM output into sentences. Using the framework's adapter instead of hand-rolled chunking kept the plugin short.
+
+## What broke on the way
+
+The pipeline ran on the first day. Getting it to run _honestly_ took longer. Four things broke, and none of them threw an error.
+
+<WhatBroke />
+
+**1. The tiny model lost your first words.** I started with sherpa's 20M streaming model, the smallest available. It worked in unit tests and then cut off the start of every live sentence. Microphone audio arrives at 48 kHz and is resampled to the 16 kHz the model expects, and the 20M model never recovered the opening syllables. The 70M model did. Lesson: test the smallest model on real mic audio, not on clean WAV files.
+
+**2. Phone audio came back empty.** Telephone calls arrive at 8 kHz. I fed a clean 8 kHz recording through the same STT, upsampled with LiveKit's audio resampler at its default quality, and got an empty transcript. Upsampled at low quality, or handed to sherpa at 8 kHz so it resamples internally, the same audio came back word for word. My best guess is that a high-quality resampler leaves the band above 4 kHz perfectly empty, which this model never saw in training. If you plan to take SIP calls, test with real 8 kHz audio, or use a model trained on telephone speech. The [phone audio post](/blog/voice-agent-phone-audio) covers what else the phone network does to your audio.
+
+**3. The "offline" agent still phoned home.** With the network up, everything looked fine. But turn detection and interruption handling default to LiveKit's hosted inference and only fall back to local models when that fails. The only clue was one log warning about an adaptive interruption detector. The fix is two explicit lines:
+
+```python
+turn_detection=inference.TurnDetector(version="v1-mini"),
+interruption={"mode": "vad"},
+```
+
+If you claim "offline", pin every default that can reach the network, and test with the network actually off.
+
+**4. The microphone sent perfect silence.** In the console, the agent greeted me and then heard nothing at all. The STT was fine. macOS had denied my terminal the microphone, and instead of an error it delivered exact digital zeros: RMS 0, peak 0. A real mic always has a noise floor, so all zeros is a reliable sign. I added a pass-through guard of about 20 lines that watches the first two seconds and logs a warning naming the System Settings page to fix.
+
+**And one claim I had to take back: the GPU was quietly doing the work.** The README said "CPU only". Then I measured. The Hugging Face plugin defaults to `device="auto"`, which on an Apple Silicon Mac picks the GPU (MPS) without saying so. The LLM's first token took about 30 ms on the GPU and about 200 ms after pinning `device="cpu"`. That is small next to the rest of the turn, but a claim on a README should be one you measured.
+
+## The numbers
+
+On an M-series Mac mini, CPU only, a spoken turn takes about 3.4 seconds from the moment you stop talking to the moment the agent starts speaking. Over three spoken turns the median was 3.37 s.
+
+<TurnLatency />
+
+About a second goes to deciding you have finished: the STT's final transcript plus the turn detector. The LLM's first token takes about 0.2 s. The remaining 2.2 s is Kokoro synthesizing the whole first sentence before any audio plays.
+
+So the LLM, the part everyone worries about, is the cheap part here. Two thirds of the wait is text to speech. A well-tuned cloud voice agent often answers in under two seconds, so the gap is real, and it is almost all in one place. That makes it the obvious next thing to fix.
+
+On answer quality: SmolLM2-135M gets simple questions right and wanders on anything harder. Swapping in a bigger model is one environment variable (`LLM_MODEL=Qwen/Qwen2.5-0.5B-Instruct`), at the cost of a slower first token.
+
+## Testing a voice agent with no microphone
+
+The test I trust most needs no human and no room. Kokoro says "What is the capital of France?" into a fake microphone. The full `AgentSession` from `main.py` has to hear it, decide the turn is over, think, and speak a reply into a fake speaker. The test then asserts three things: the transcript contains "FRANCE", the agent produced a text reply, and real audio came out.
+
+<MicFreeTest />
+
+The fakes follow the pattern of LiveKit's own `tests/fake_io.py`: an `AudioInput` that pushes 10 ms frames at real-time pace, and an `AudioOutput` that collects frames. It runs offline in about 20 seconds, so it runs on every change. One more lesson from it: wait for an event, not for a fixed time. My first version slept three seconds for the greeting and failed whenever the machine was busy.
+
+## Try it
+
+```sh
+git clone https://github.com/mahimairaja/local-livekit && cd local-livekit
+uv sync
+LIVEKIT_HF_MODELS=HuggingFaceTB/SmolLM2-135M-Instruct@12fd25f77366fa6b3b4b768ec3050bf629380bac \
+  uv run -m livekit.agents download-files   # once, online
+uv run python main.py console               # now turn the Wi-Fi off and talk
+```
+
+The noise cancellation and the Hugging Face LLM plugin are open upstream PRs ([#6477](https://github.com/livekit/agents/pull/6477), [#7731](https://github.com/livekit/agents/pull/7731)). The sherpa STT and TTS plugin is next to propose. On the repo side: cut the TTS wait by streaming Kokoro's audio sooner, try bigger STT models for accuracy, and add a small React frontend so you can talk to it in a browser.
+
+## What this means for you
+
+1. **Offline is a property you test, not a flag you set.** Pin every default that can reach the network (turn detection, interruptions, device selection), then run the agent with the network actually off before you promise it to anyone.
+2. **Look at TTS before you shrink the LLM.** On a CPU the first sentence of speech is the long pole. Streaming audio out sooner buys more than a smaller brain.
+3. **Feed it the audio it will really get.** Live mic audio at 48 kHz and phone audio at 8 kHz broke this pipeline in ways clean WAV files never did. Make one end-to-end test speak through a fake mic and keep it on every change.
+
+The repo is [github.com/mahimairaja/local-livekit](https://github.com/mahimairaja/local-livekit). If you run voice agents somewhere a cloud API can't reach, I'd like to hear what you would swap in first: a better voice, a bigger brain, or better ears?
+
+If your team has to keep audio on premises (a hospital, a bank, a plant floor) and needs the agent to hold up in production, that is the kind of system a [production readiness review](/contact) measures: latency per hop, failure paths and what runs where.
