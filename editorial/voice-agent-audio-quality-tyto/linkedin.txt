@@ -1,0 +1,19 @@
+Your voice agent cannot hear the phone line. It only sees the transcript.
+
+A driver on a highway shoulder reads you their plate over traffic noise. STT returns a confident string. The model calls set_plate. The tow truck goes to the wrong car.
+
+Nothing in that chain "failed". The warning was in the audio, and the cascade threw it away at the first step.
+
+So we added a second listener to the call:
+→ score the caller's raw audio on a rolling 5 second window (ai-coustics Tyto)
+→ smooth it, and only react after a couple of bad windows in a row
+→ stamp every captured field with the line quality at the moment it was heard
+→ refuse to dispatch until anything heard on a bad line is read back
+
+The last step is the one that matters. "Be careful on a bad line" in a prompt is a wish. A dispatch tool that rejects unconfirmed fields is a guarantee.
+
+It is live in our playground now. Give your plate with music playing and watch it land as unconfirmed.
+
+Which field in your agent would hurt most if it was misheard?
+
+https://mahimai.ca/blog/voice-agent-audio-quality-tyto
