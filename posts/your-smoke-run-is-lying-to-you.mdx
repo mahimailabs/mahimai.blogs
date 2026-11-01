@@ -5,26 +5,15 @@ pubDate: 2026-08-18
 updatedDate: 2026-09-30
 tags: ['benchmarking', 'evaluation', 'telephony']
 author: 'Mahimai Raja J'
-cover: ./images/smoke-run/smoke-cover.webp
-coverAlt: An audio engineer examines a few waveform cards beside a larger archive of varied test samples.
-socialImage: ./images/smoke-run/smoke-social.jpg
+cover: ./covers/your-smoke-run-is-lying-to-you.webp
+coverDark: ./covers/your-smoke-run-is-lying-to-you-dark.webp
+coverAlt: 'Line diagram for Your smoke run is lying to you'
+socialImage: ./covers/your-smoke-run-is-lying-to-you-social.jpg
 ---
 
-import { Image } from 'astro:assets';
-import coverImage from './images/smoke-run/smoke-cover.webp';
 import SamplingCollapse from '../../components/blog/figures/SamplingCollapse.astro';
 import BenchmarkResolution from '../../components/blog/figures/BenchmarkResolution.astro';
 import TranscriptProvenance from '../../components/blog/figures/TranscriptProvenance.astro';
-
-<Image
-  src={coverImage}
-  alt="An audio engineer examines a few waveform cards beside a larger archive of varied test samples."
-  widths={[480, 800, 1200, 1600]}
-  sizes="(min-width: 1280px) 784px, (min-width: 1024px) 55vw, (min-width: 832px) 792px, calc(100vw - 40px)"
-  loading="eager"
-  fetchpriority="high"
-  class="article-cover"
-/>
 
 Our 12-utterance smoke run completed every stage of a text-to-speech benchmark: synthesise the prompt, transform the audio, transcribe it, and score the transcript. Two synthesis systems, four audio conditions, neatly formatted scores. It looked ready for a larger run.
 
