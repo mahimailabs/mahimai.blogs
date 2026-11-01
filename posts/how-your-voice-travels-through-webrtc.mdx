@@ -6,20 +6,18 @@ updatedDate: 2026-09-30
 author: 'Mahimai Raja J'
 tags: ['webrtc', 'voice-ai', 'audio', 'latency']
 draft: false
-cover: ./images/webrtc/webrtc-cover-watercolour.webp
-coverAlt: A woman speaks at her laptop as audio packets travel to a server and a reply returns.
-socialImage: ./images/webrtc/webrtc-cover-watercolour-social.jpg
+cover: ./covers/how-your-voice-travels-through-webrtc.webp
+coverDark: ./covers/how-your-voice-travels-through-webrtc-dark.webp
+coverAlt: 'Line diagram for How your voice travels through WebRTC'
+socialImage: ./covers/how-your-voice-travels-through-webrtc-social.jpg
 ---
 
 import JitterLab from '@/components/islands/JitterLab';
 import VoiceCallMap from '@/components/blog/VoiceCallMap.astro';
 import ResponseTimeline from '@/components/blog/ResponseTimeline.astro';
 import { Image } from 'astro:assets';
-import coverImage from './images/webrtc/webrtc-cover-watercolour.webp';
 import jitterImage from './images/webrtc/webrtc-jitter-watercolour.webp';
 import interruptionImage from './images/webrtc/webrtc-interruption-watercolour.webp';
-
-<Image src={coverImage} alt="A woman speaks at her laptop as audio packets travel to a server and a reply returns." widths={[480, 800, 1200, 1672]} sizes="(min-width: 1280px) 784px, (min-width: 1024px) 55vw, (min-width: 832px) 792px, calc(100vw - 40px)" loading="eager" fetchpriority="high" class="article-cover" />
 
 You say, “Can I move my appointment to Friday?”
 

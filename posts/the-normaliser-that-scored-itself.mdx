@@ -5,27 +5,16 @@ pubDate: 2026-08-13
 updatedDate: 2026-09-30
 tags: ['telephony', 'evaluation', 'asr', 'benchmarking']
 author: 'Mahimai Raja J'
-cover: ./images/normaliser/normaliser-cover.webp
-coverAlt: An audio researcher compares transcript strips marked 0 0 7 and 7 beside a telephone and laptop.
-socialImage: ./images/normaliser/normaliser-social.jpg
+cover: ./covers/the-normaliser-that-scored-itself.webp
+coverDark: ./covers/the-normaliser-that-scored-itself-dark.webp
+coverAlt: 'Line diagram for The normaliser that scored itself'
+socialImage: ./covers/the-normaliser-that-scored-itself-social.jpg
 ---
 
-import { Image } from 'astro:assets';
-import coverImage from './images/normaliser/normaliser-cover.webp';
 import NormaliserFailure from '../../components/blog/figures/NormaliserFailure.astro';
 import NormaliserConvergence from '../../components/blog/figures/NormaliserConvergence.astro';
 import validationScript from './images/normaliser/verify-normaliser.py?url&no-inline';
 import validationOutput from './images/normaliser/verified-output.json?url&no-inline';
-
-<Image
-  src={coverImage}
-  alt="An audio researcher compares transcript strips marked 0 0 7 and 7 beside a telephone and laptop."
-  widths={[480, 800, 1200, 1600]}
-  sizes="(min-width: 1280px) 784px, (min-width: 1024px) 55vw, (min-width: 832px) 792px, calc(100vw - 40px)"
-  loading="eager"
-  fetchpriority="high"
-  class="article-cover"
-/>
 
 “Six one three five five five zero one nine eight” and `613 555 0198` describe the same phone number. Put those strings through the English normaliser used in our benchmark, then calculate word error rate: **300%**.
 
