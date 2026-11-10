@@ -7,7 +7,7 @@ author: 'Mahimai'
 authors:
   - name: 'Mahimai'
 draft: false
-cover: ./images/siprec-explained-how-to-get-live-call-audio-into-an-ai-agent/f5e84f61-siprec-cover-16x9.webp
+cover: ./images/siprec-explained/f5e84f61-siprec-cover-16x9.webp
 coverAlt: 'Put AI on live calls without touching them: John Doe and Kai talk through an SBC while a copy of each voice drops down to an AI'
 ---
 
@@ -45,7 +45,7 @@ The SRC opens a brand new SIP session to the SRS, separate from the real call. T
 7. **Things change mid-call.** Hold, transfer, a codec switch or a new participant arrive as a re-INVITE or UPDATE with new SDP or new metadata.
 8. **The call ends.** The SBC sends `BYE` on the recording session.
 
-![One SIPREC session from start to finish: INVITE, 200 OK, ACK, RTP for each voice, re-INVITE, BYE](./images/siprec-explained-how-to-get-live-call-audio-into-an-ai-agent/0f81cf75-siprec-call-flow.webp)
+![One SIPREC session from start to finish: INVITE, 200 OK, ACK, RTP for each voice, re-INVITE, BYE](./images/siprec-explained/0f81cf75-siprec-call-flow.webp)
 
 Keeping each side on its own stream is a big deal for AI. You get clean speaker separation for free, with no diarization model guessing who said what.
 
@@ -104,7 +104,7 @@ Content-Disposition: recording-session
 
 Read it bottom up: participant `p1` (John Doe) sends stream `st1`, stream `st1` has label `1`, and label `1` is the first `m=audio` line on port 40000. So the RTP on that stream is John Doe's voice. Real SBCs add vendor extensions (Cisco, Oracle and Ribbon all put extra call data in their own XML namespaces), but this core is standard.
 
-![Follow the ids: John Doe is p1, sends st1, label 1, port 40000; Kai is p2, sends st2, label 2, port 40002](./images/siprec-explained-how-to-get-live-call-audio-into-an-ai-agent/60f49ef5-siprec-follow-the-ids.webp)
+![Follow the ids: John Doe is p1, sends st1, label 1, port 40000; Kai is p2, sends st2, label 2, port 40002](./images/siprec-explained/60f49ef5-siprec-follow-the-ids.webp)
 
 ## Build it: SIPREC into LiveKit in Python
 
@@ -119,7 +119,7 @@ Any LiveKit agent that joins the room now hears John Doe and Kai as two separate
 
 The server is about 200 lines with two dependencies (`livekit==1.2.0`, `livekit-api==1.2.2`). The code, with a fake SBC to test it, is on GitHub at [mahimailabs/siprec-livekit](https://github.com/mahimailabs/siprec-livekit). Here are the parts that matter.
 
-![What you deploy: SBC and srs.py on your phone network, the SFU room on LiveKit Cloud, and an AI agent with speech to text and an LLM on your agent server](./images/siprec-explained-how-to-get-live-call-audio-into-an-ai-agent/6e5b05d9-siprec-stack-v2.webp)
+![What you deploy: SBC and srs.py on your phone network, the SFU room on LiveKit Cloud, and an AI agent with speech to text and an LLM on your agent server](./images/siprec-explained/6e5b05d9-siprec-stack-v2.webp)
 
 **Matching streams to speakers.** Parse the SDP for `m=audio` and `a=label`, then walk the metadata from participant to stream to label:
 
@@ -214,7 +214,7 @@ Check your exact SBC model and software version before you promise a customer an
 
 ## SIPREC vs the other ways to get live call audio
 
-![Where the AI sits: in the call with a SIP trunk, beside the call with SIPREC](./images/siprec-explained-how-to-get-live-call-audio-into-an-ai-agent/b7a248cc-siprec-where-ai-sits.webp)
+![Where the AI sits: in the call with a SIP trunk, beside the call with SIPREC](./images/siprec-explained/b7a248cc-siprec-where-ai-sits.webp)
 
 | Approach | Where it fits | What you get | Watch out for |
 | --- | --- | --- | --- |
